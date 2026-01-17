@@ -1,0 +1,60 @@
+#include "paddle.h"
+#include <stddef.h>
+
+#define PADDLE_SPEED 6.0f
+
+void UpdatePaddlePosition(Paddle *paddle, int screenHeight)
+{
+    if (paddle == NULL) return;
+
+    paddle->position.y += paddle->velocity;
+
+    // Keep paddle within screen bounds
+    if (paddle->position.y < 0.0f) {
+        paddle->position.y = 0.0f;
+    }
+    if (paddle->position.y + paddle->height > (float)screenHeight) {
+        paddle->position.y = (float)screenHeight - paddle->height;
+    }
+}
+
+void MovePaddleUp(Paddle *paddle)
+{
+    if (paddle == NULL) return;
+    paddle->velocity = -PADDLE_SPEED;
+}
+
+void MovePaddleDown(Paddle *paddle)
+{
+    if (paddle == NULL) return;
+    paddle->velocity = PADDLE_SPEED;
+}
+
+void StopPaddle(Paddle *paddle)
+{
+    if (paddle == NULL) return;
+    paddle->velocity = 0.0f;
+}
+
+void UpdateAIPaddle(Paddle *paddle, Vector2 ballPosition, float ballRadius, int screenHeight)
+{
+    if (paddle == NULL) return;
+    (void)ballRadius;  // Unused but kept for API consistency
+
+    // Calculate paddle center
+    float paddleCenter = paddle->position.y + paddle->height / 2.0f;
+
+    // Move paddle towards ball with slight delay (imperfect AI)
+    float aiSpeed = PADDLE_SPEED * 0.85f;  // AI is slightly slower than player for balance
+
+    if (ballPosition.y < paddleCenter - 10.0f) {
+        paddle->velocity = -aiSpeed;
+    } else if (ballPosition.y > paddleCenter + 10.0f) {
+        paddle->velocity = aiSpeed;
+    } else {
+        paddle->velocity = 0.0f;
+    }
+
+    // Update position
+    UpdatePaddlePosition(paddle, screenHeight);
+}
