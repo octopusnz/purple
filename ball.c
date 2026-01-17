@@ -2,6 +2,8 @@
 #include <stddef.h>
 #include <math.h>
 
+#define SPIN_EFFECT_MULTIPLIER 3.0f
+
 void UpdateBallPosition(Ball* ball) {
     if (ball == NULL) return;
     
@@ -62,5 +64,5 @@ void HandlePaddleCollision(Ball* ball, Vector2 paddlePosition, float paddleWidth
     float hitPosition = ball->position.y - paddleCenter;
     float spinFactor = hitPosition / (paddleHeight / 2.0f);  // Range: -1 to 1
 
-    ball->velocity.y += spinFactor * 3.0f;
+    ball->velocity.y += spinFactor * SPIN_EFFECT_MULTIPLIER;
 }

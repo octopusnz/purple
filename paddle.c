@@ -2,6 +2,8 @@
 #include <stddef.h>
 
 #define PADDLE_SPEED 6.0f
+#define AI_SPEED_FACTOR 0.85f
+#define AI_DEAD_ZONE 10.0f
 
 void UpdatePaddlePosition(Paddle *paddle, int screenHeight)
 {
@@ -45,11 +47,11 @@ void UpdateAIPaddle(Paddle *paddle, Vector2 ballPosition, float ballRadius, int 
     float paddleCenter = paddle->position.y + paddle->height / 2.0f;
 
     // Move paddle towards ball with slight delay (imperfect AI)
-    float aiSpeed = PADDLE_SPEED * 0.85f;  // AI is slightly slower than player for balance
+    float aiSpeed = PADDLE_SPEED * AI_SPEED_FACTOR;
 
-    if (ballPosition.y < paddleCenter - 10.0f) {
+    if (ballPosition.y < paddleCenter - AI_DEAD_ZONE) {
         paddle->velocity = -aiSpeed;
-    } else if (ballPosition.y > paddleCenter + 10.0f) {
+    } else if (ballPosition.y > paddleCenter + AI_DEAD_ZONE) {
         paddle->velocity = aiSpeed;
     } else {
         paddle->velocity = 0.0f;

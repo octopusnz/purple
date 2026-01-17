@@ -1,7 +1,7 @@
 #ifndef BALL_H
 #define BALL_H
 
-#include <raylib.h>
+#include <raylib/raylib.h>
 
 typedef struct {
     Vector2 position;

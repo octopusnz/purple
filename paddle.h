@@ -1,7 +1,7 @@
 #ifndef PADDLE_H
 #define PADDLE_H
 
-#include <raylib.h>
+#include <raylib/raylib.h>
 
 typedef struct {
     Vector2 position;  // Top-left corner of paddle

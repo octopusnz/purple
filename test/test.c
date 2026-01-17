@@ -366,21 +366,54 @@ int file_exists(const char *filename) {
     return (stat(filename, &buffer) == 0);
 }
 
-void test_FontFile_ExistsAtRelativePath(void) {
-    // Font should be accessible from ../resources/ when running from build directory
-    // Skip test if file doesn't exist (might be running from different location)
-    int exists = file_exists("../resources/orbitron/Orbitron-VariableFont_wght.ttf");
-    if (!exists) {
-        TEST_IGNORE_MESSAGE("Font file not found at expected path");
+int directory_exists(const char *dirname) {
+    struct stat buffer;
+    return (stat(dirname, &buffer) == 0 && S_ISDIR(buffer.st_mode));
+}
+
+// Find resources directory by searching parent directories
+const char* find_resource_directory(void) {
+    static char resourcePath[512];
+    const char *basePaths[] = {
+        "./resources",
+        "resources",
+        "../resources",
+        "../../resources",
+        "../../../resources",
+    };
+
+    for (size_t i = 0; i < sizeof(basePaths) / sizeof(basePaths[0]); i++) {
+        if (directory_exists(basePaths[i])) {
+            snprintf(resourcePath, sizeof(resourcePath), "%s", basePaths[i]);
+            return resourcePath;
+        }
     }
-    TEST_ASSERT_TRUE(exists);
+
+    // Default fallback
+    return "./resources";
+}
+
+void test_FontFile_ExistsAtRelativePath(void) {
+    // Font should be accessible from the resources directory
+    const char *resourceDir = find_resource_directory();
+    char fontPath[512];
+    snprintf(fontPath, sizeof(fontPath), "%s/orbitron/Orbitron-VariableFont_wght.ttf", resourceDir);
+
+    if (!file_exists(fontPath)) {
+        TEST_IGNORE_MESSAGE("Font file not found in resources directory");
+    }
+    TEST_ASSERT_TRUE(file_exists(fontPath));
 }
 
 void test_FontFile_IsReadable(void) {
-    // Font file should be readable
-    FILE *fp = fopen("../resources/orbitron/Orbitron-VariableFont_wght.ttf", "rb");
+    // Font file should be readable from the resources directory
+    const char *resourceDir = find_resource_directory();
+    char fontPath[512];
+    snprintf(fontPath, sizeof(fontPath), "%s/orbitron/Orbitron-VariableFont_wght.ttf", resourceDir);
+
+    FILE *fp = fopen(fontPath, "rb");
     if (!fp) {
-        TEST_IGNORE_MESSAGE("Font file not found");
+        TEST_IGNORE_MESSAGE("Font file not found in resources directory");
     }
     TEST_ASSERT_NOT_NULL(fp);
     if (fp) {
@@ -390,9 +423,13 @@ void test_FontFile_IsReadable(void) {
 
 void test_FontFile_HasValidSize(void) {
     // Font file should have content (not empty)
-    FILE *fp = fopen("../resources/orbitron/Orbitron-VariableFont_wght.ttf", "rb");
+    const char *resourceDir = find_resource_directory();
+    char fontPath[512];
+    snprintf(fontPath, sizeof(fontPath), "%s/orbitron/Orbitron-VariableFont_wght.ttf", resourceDir);
+
+    FILE *fp = fopen(fontPath, "rb");
     if (!fp) {
-        TEST_IGNORE_MESSAGE("Font file not found");
+        TEST_IGNORE_MESSAGE("Font file not found in resources directory");
     }
     TEST_ASSERT_NOT_NULL(fp);
     if (fp) {
@@ -405,9 +442,13 @@ void test_FontFile_HasValidSize(void) {
 
 void test_FontFile_IsTTFFormat(void) {
     // TTF files start with specific magic bytes
-    FILE *fp = fopen("../resources/orbitron/Orbitron-VariableFont_wght.ttf", "rb");
+    const char *resourceDir = find_resource_directory();
+    char fontPath[512];
+    snprintf(fontPath, sizeof(fontPath), "%s/orbitron/Orbitron-VariableFont_wght.ttf", resourceDir);
+
+    FILE *fp = fopen(fontPath, "rb");
     if (!fp) {
-        TEST_IGNORE_MESSAGE("Font file not found");
+        TEST_IGNORE_MESSAGE("Font file not found in resources directory");
     }
     TEST_ASSERT_NOT_NULL(fp);
     if (fp) {

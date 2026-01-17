@@ -7,6 +7,9 @@ IFS=$' \t\n'
 # Enable alias expansion in non-interactive shell
 shopt -s expand_aliases
 alias gcc='/usr/local/bin/gcc-15.2.0'
+alias clang='/usr/local/bin/clang'
+alias clang-tidy='/usr/local/bin/clang-tidy'
+alias scan-build='/usr/local/bin/scan-build'
 
 # Check for mode
 DEBUG_MODE=false
@@ -68,47 +71,78 @@ if [ -f main-ubsan ]; then
     echo "Removing old UBSan binary..."
     rm main-ubsan
 fi
-echo "Compiling with GCC version:"
-gcc --version
+echo "Compiling with GCC...:"
+
+# Function to format elapsed time (shows ms if < 1s, otherwise seconds)
+format_elapsed_time() {
+    local elapsed_ms=$1
+    if [ "$elapsed_ms" -lt 1000 ]; then
+        echo "${elapsed_ms}ms"
+    else
+        local elapsed_s=$((elapsed_ms / 1000))
+        echo "${elapsed_s}s"
+    fi
+}
 
 # Set compilation flags based on mode
+BUILD_START_TIME=$(date +%s%3N)
 if [ "$DEBUG_MODE" = true ]; then
     # Debug build with sanitizers
     GCC_LOG="logs/gcc_$(date +%Y-%m-%d_%H-%M-%S).log"
-    echo "Capturing compiler output to $GCC_LOG..."
     {
         echo "=== GCC Compilation ==="
+        echo "GCC Version: $(gcc --version | head -1)"
         echo "Started: $(date)"
         echo ""
         echo "--- Building main-asan ---"
-        gcc main.c ball.c paddle.c -o build/main-asan -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion -Wsign-conversion -Wdouble-promotion -Wformat=2 -fno-omit-frame-pointer -fanalyzer -std=c99 -fsanitize=address -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-asan -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion -Wsign-conversion -Wdouble-promotion -Wformat=2 -fno-omit-frame-pointer -fanalyzer -std=c99 -fsanitize=address -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
         echo ""
         echo "--- Building main-ubsan ---"
-        gcc main.c ball.c paddle.c -o build/main-ubsan -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion -Wsign-conversion -Wdouble-promotion -Wformat=2 -fno-omit-frame-pointer -fanalyzer -std=c99 -fsanitize=undefined -fno-sanitize-recover=undefined -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-ubsan -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion -Wsign-conversion -Wdouble-promotion -Wformat=2 -fno-omit-frame-pointer -fanalyzer -std=c99 -fsanitize=undefined -fno-sanitize-recover=undefined -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
         echo ""
         echo "--- Building main-valgrind ---"
-        gcc main.c ball.c paddle.c -o build/main-valgrind -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion -Wsign-conversion -Wdouble-promotion -Wformat=2 -fno-omit-frame-pointer -fanalyzer -std=c99 -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-valgrind -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion -Wsign-conversion -Wdouble-promotion -Wformat=2 -fno-omit-frame-pointer -fanalyzer -std=c99 -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
         echo ""
         echo "Completed: $(date)"
     } > "$GCC_LOG" 2>&1
     
-    # Clean up old GCC log files (keep only 3 most recent)
+    # Clean up old GCC log files (keep only 2 most recent)
     # shellcheck disable=SC2012
-    if [ "$(ls logs/gcc_*.log 2>/dev/null | wc -l)" -gt 3 ]; then
-        echo "Cleaning up old GCC logs..."
+    if [ "$(ls logs/gcc_*.log 2>/dev/null | wc -l)" -gt 2 ]; then
         # shellcheck disable=SC2012
-        ls -t logs/gcc_*.log | sed -n '4,$p' | while read -r file; do
-            echo "Removing $file"
+        ls -t logs/gcc_*.log | sed -n '3,$p' | while read -r file; do
+            rm "$file"
+        done
+    fi
+    
+    echo "Compiling with Clang..."
+    CLANG_LOG="logs/clang_$(date +%Y-%m-%d_%H-%M-%S).log"
+    {
+        echo "=== Clang Compilation ==="
+        echo "Clang Version: $(clang --version | head -1)"
+        echo "Started: $(date)"
+        echo ""
+        echo "--- Building main-clang ---"
+        clang main.c ball.c paddle.c resource.c leaderboard.c -o build/main-clang -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion -Wsign-conversion -Wdouble-promotion -Wformat=2 -std=c99 -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+        echo ""
+        echo "Completed: $(date)"
+    } > "$CLANG_LOG" 2>&1
+    
+    # Clean up old Clang log files (keep only 2 most recent)
+    # shellcheck disable=SC2012
+    if [ "$(ls logs/clang_*.log 2>/dev/null | wc -l)" -gt 2 ]; then
+        # shellcheck disable=SC2012
+        ls -t logs/clang_*.log | sed -n '3,$p' | while read -r file; do
             rm "$file"
         done
     fi
 elif [ "$TEST_MODE" = true ]; then
     # Test build
     echo "Compiling tests..."
-    gcc ball.c paddle.c /usr/local/include/unity/unity.c test/test.c -o build/test_runner -Wall -Wextra -Wpedantic -std=c99 -I. -lraylib -lm -lpthread -ldl -lrt -lX11
+    gcc ball.c paddle.c resource.c leaderboard.c /usr/local/include/unity/unity.c test/test.c -o build/test_runner -Wall -Wextra -Wpedantic -std=c99 -I. -lraylib -lm -lpthread -ldl -lrt -lX11
 else
     # Production build with size optimizations
-    gcc main.c ball.c paddle.c -o build/main -Wall -Wextra -Wpedantic -std=c99 -Os -s -flto -lraylib -lm -lpthread -ldl -lrt -lX11
+    gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main -Wall -Wextra -Wpedantic -std=c99 -Os -s -flto -lraylib -lm -lpthread -ldl -lrt -lX11
     strip --strip-all build/main
     echo "Production build complete"
 fi
@@ -120,9 +154,10 @@ if [ "$DEBUG_MODE" = true ]; then
     CHECKERS_REPORT=$(mktemp)
     {
         echo "=== Cppcheck Static Analysis ==="
+        echo "Cppcheck Version: $(cppcheck --version)"
         echo "Started: $(date)"
         echo ""
-        cppcheck --enable=all --inconclusive --verbose --force --suppress=missingIncludeSystem --std=c99 --checkers-report="$CHECKERS_REPORT" main.c 2>&1 || true
+        cppcheck --check-level=exhaustive --enable=all --inconclusive --verbose --force --suppress=missingIncludeSystem --std=c99 --checkers-report="$CHECKERS_REPORT" main.c 2>&1 || true
         echo ""
         echo "=== Checkers Report ==="
         cat "$CHECKERS_REPORT"
@@ -131,13 +166,11 @@ if [ "$DEBUG_MODE" = true ]; then
     } > "$CPPCHECK_LOG"
     rm "$CHECKERS_REPORT"
     
-    # Clean up old cppcheck log files (keep only 3 most recent)
+    # Clean up old cppcheck log files (keep only 2 most recent)
     # shellcheck disable=SC2012
-    if [ "$(ls logs/cppcheck_*.log 2>/dev/null | wc -l)" -gt 3 ]; then
-        echo "Cleaning up old cppcheck logs..."
+    if [ "$(ls logs/cppcheck_*.log 2>/dev/null | wc -l)" -gt 2 ]; then
         # shellcheck disable=SC2012
-        ls -t logs/cppcheck_*.log | sed -n '4,$p' | while read -r file; do
-            echo "Removing $file"
+        ls -t logs/cppcheck_*.log | sed -n '3,$p' | while read -r file; do
             rm "$file"
         done
     fi
@@ -146,20 +179,40 @@ if [ "$DEBUG_MODE" = true ]; then
     CLANGTIDY_LOG="logs/clang-tidy_$(date +%Y-%m-%d_%H-%M-%S).log"
     {
         echo "=== Clang-Tidy Static Analysis ==="
+        echo "Clang-Tidy Version: $(clang-tidy --version 2>&1 | grep -i 'version' | head -1)"
         echo "Started: $(date)"
         echo ""
-        clang-tidy main.c -- -std=c99 -I/usr/include -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1 || true
+        clang-tidy main.c ball.c paddle.c resource.c leaderboard.c -- -std=c99 -I. -I/usr/include 2>&1 || true
         echo ""
         echo "Completed: $(date)"
     } > "$CLANGTIDY_LOG"
     
-    # Clean up old clang-tidy log files (keep only 3 most recent)
+    # Clean up old clang-tidy log files (keep only 2 most recent)
     # shellcheck disable=SC2012
-    if [ "$(ls logs/clang-tidy_*.log 2>/dev/null | wc -l)" -gt 3 ]; then
-        echo "Cleaning up old clang-tidy logs..."
+    if [ "$(ls logs/clang-tidy_*.log 2>/dev/null | wc -l)" -gt 2 ]; then
         # shellcheck disable=SC2012
-        ls -t logs/clang-tidy_*.log | sed -n '4,$p' | while read -r file; do
-            echo "Removing $file"
+        ls -t logs/clang-tidy_*.log | sed -n '3,$p' | while read -r file; do
+            rm "$file"
+        done
+    fi
+    
+    echo "Running scan-build static analysis..."
+    SCANBUILD_LOG="logs/scan-build_$(date +%Y-%m-%d_%H-%M-%S).log"
+    {
+        echo "=== Scan-Build Static Analysis ==="
+        echo "Clang Version: $(clang --version 2>&1 | grep -i 'version' | head -1)"
+        echo "Started: $(date)"
+        echo ""
+        scan-build -o build/scan-build-results gcc main.c ball.c paddle.c resource.c leaderboard.c -o /dev/null -std=c99 -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1 || true
+        echo ""
+        echo "Completed: $(date)"
+    } > "$SCANBUILD_LOG"
+    
+    # Clean up old scan-build log files (keep only 2 most recent)
+    # shellcheck disable=SC2012
+    if [ "$(ls logs/scan-build_*.log 2>/dev/null | wc -l)" -gt 2 ]; then
+        # shellcheck disable=SC2012
+        ls -t logs/scan-build_*.log | sed -n '3,$p' | while read -r file; do
             rm "$file"
         done
     fi
@@ -168,6 +221,8 @@ if [ "$DEBUG_MODE" = true ]; then
     ASAN_LOG="logs/asan_$(date +%Y-%m-%d_%H-%M-%S).log"
     {
         echo "=== AddressSanitizer Analysis ==="
+        echo "GCC Version: $(gcc --version | head -1)"
+        echo "Sanitizer: AddressSanitizer (ASAN)"
         echo "Started: $(date)"
         echo ""
         timeout 5 ./build/main-asan 2>&1 || true
@@ -183,13 +238,11 @@ if [ "$DEBUG_MODE" = true ]; then
     fi
     echo "Completed: $(date)" >> "$ASAN_LOG"
     
-    # Clean up old ASAN log files (keep only 3 most recent)
+    # Clean up old ASAN log files (keep only 2 most recent)
     # shellcheck disable=SC2012
-    if [ "$(ls logs/asan_*.log 2>/dev/null | wc -l)" -gt 3 ]; then
-        echo "Cleaning up old ASAN logs..."
+    if [ "$(ls logs/asan_*.log 2>/dev/null | wc -l)" -gt 2 ]; then
         # shellcheck disable=SC2012
-        ls -t logs/asan_*.log | sed -n '4,$p' | while read -r file; do
-            echo "Removing $file"
+        ls -t logs/asan_*.log | sed -n '3,$p' | while read -r file; do
             rm "$file"
         done
     fi
@@ -198,6 +251,8 @@ if [ "$DEBUG_MODE" = true ]; then
     UBSAN_LOG="logs/ubsan_$(date +%Y-%m-%d_%H-%M-%S).log"
     {
         echo "=== UndefinedBehaviorSanitizer Analysis ==="
+        echo "GCC Version: $(gcc --version | head -1)"
+        echo "Sanitizer: UndefinedBehaviorSanitizer (UBSan)"
         echo "Started: $(date)"
         echo ""
         timeout 5 ./build/main-ubsan 2>&1 || true
@@ -213,13 +268,11 @@ if [ "$DEBUG_MODE" = true ]; then
     fi
     echo "Completed: $(date)" >> "$UBSAN_LOG"
 
-    # Clean up old UBSan log files (keep only 3 most recent)
+    # Clean up old UBSan log files (keep only 2 most recent)
     # shellcheck disable=SC2012
-    if [ "$(ls logs/ubsan_*.log 2>/dev/null | wc -l)" -gt 3 ]; then
-        echo "Cleaning up old UBSan logs..."
+    if [ "$(ls logs/ubsan_*.log 2>/dev/null | wc -l)" -gt 2 ]; then
         # shellcheck disable=SC2012
-        ls -t logs/ubsan_*.log | sed -n '4,$p' | while read -r file; do
-            echo "Removing $file"
+        ls -t logs/ubsan_*.log | sed -n '3,$p' | while read -r file; do
             rm "$file"
         done
     fi
@@ -228,6 +281,7 @@ if [ "$DEBUG_MODE" = true ]; then
     VALGRIND_LOG="logs/valgrind_$(date +%Y-%m-%d_%H-%M-%S).log"
     {
         echo "=== Valgrind Memory Analysis ==="
+        echo "Valgrind Version: $(valgrind --version)"
         echo "Started: $(date)"
         echo ""
         timeout 5 valgrind --leak-check=full -s ./build/main-valgrind 2>&1 || true
@@ -244,16 +298,19 @@ if [ "$DEBUG_MODE" = true ]; then
     echo "Completed: $(date)" >> "$VALGRIND_LOG"
     
     
-    # Clean up old Valgrind log files (keep only 3 most recent)
+    # Clean up old Valgrind log files (keep only 2 most recent)
     # shellcheck disable=SC2012
-    if [ "$(ls logs/valgrind_*.log 2>/dev/null | wc -l)" -gt 3 ]; then
-        echo "Cleaning up old Valgrind logs..."
+    if [ "$(ls logs/valgrind_*.log 2>/dev/null | wc -l)" -gt 2 ]; then
         # shellcheck disable=SC2012
-        ls -t logs/valgrind_*.log | sed -n '4,$p' | while read -r file; do
-            echo "Removing $file"
+        ls -t logs/valgrind_*.log | sed -n '3,$p' | while read -r file; do
             rm "$file"
         done
     fi
+    TOTAL_END_TIME=$(date +%s%3N)
+    TOTAL_ELAPSED_MS=$((TOTAL_END_TIME - BUILD_START_TIME))
+    TOTAL_ELAPSED=$(format_elapsed_time "$TOTAL_ELAPSED_MS")
+    echo ""
+    echo "Total debug execution time: ${TOTAL_ELAPSED}"
 fi
 
 # Run tests if in test mode
@@ -270,6 +327,18 @@ if [ "$TEST_MODE" = true ]; then
         echo "✗ Tests failed with exit code $TEST_EXIT_CODE"
         exit $TEST_EXIT_CODE
     fi
+    TOTAL_END_TIME=$(date +%s%3N)
+    TOTAL_ELAPSED_MS=$((TOTAL_END_TIME - BUILD_START_TIME))
+    TOTAL_ELAPSED=$(format_elapsed_time "$TOTAL_ELAPSED_MS")
+    echo ""
+    echo "Total test execution time: ${TOTAL_ELAPSED}"
+elif [ "$DEBUG_MODE" = false ] && [ "$TEST_MODE" = false ]; then
+    # Production mode total time
+    TOTAL_END_TIME=$(date +%s%3N)
+    TOTAL_ELAPSED_MS=$((TOTAL_END_TIME - BUILD_START_TIME))
+    TOTAL_ELAPSED=$(format_elapsed_time "$TOTAL_ELAPSED_MS")
+    echo ""
+    echo "Total build time: ${TOTAL_ELAPSED}"
 fi
 
 
