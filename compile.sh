@@ -426,6 +426,10 @@ elif [ "$FUZZ_MODE" = true ]; then
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 2>&1
         echo ""
+        # Count initial corpus files
+        INITIAL_CORPUS_COUNT=$(find fuzz/corpus -type f 2>/dev/null | wc -l)
+        echo "Corpus count: $INITIAL_CORPUS_COUNT"
+        echo ""
         # Set timeout based on mode: 60s for quick fuzz, 720s (12 min) for long fuzz
         if [ "$FUZZ_LONG_MODE" = true ]; then
             FUZZ_TIMEOUT=720
@@ -474,6 +478,12 @@ elif [ "$FUZZ_MODE" = true ]; then
             -timeout=2 \
             fuzz/corpus/ 2>&1 || true
         echo ""
+        # Count final corpus files and display statistics
+        FINAL_CORPUS_COUNT=$(find fuzz/corpus -type f 2>/dev/null | wc -l)
+        NEW_CORPUS_FILES=$((FINAL_CORPUS_COUNT - INITIAL_CORPUS_COUNT))
+        echo "Corpus count: $FINAL_CORPUS_COUNT"
+        echo "Corpus created: $NEW_CORPUS_FILES"
+        echo ""
         echo "Completed: $(date)"
     } > "$FUZZ_LOG" 2>&1
     
@@ -486,6 +496,14 @@ elif [ "$FUZZ_MODE" = true ]; then
         done
     fi
     
+    echo ""
+    
+    # Display corpus statistics in terminal
+    FINAL_CORPUS_COUNT=$(find fuzz/corpus -type f 2>/dev/null | wc -l)
+    INITIAL_CORPUS_COUNT=$(grep "^Corpus count:" "$FUZZ_LOG" | head -1 | awk '{print $3}')
+    NEW_CORPUS_FILES=$((FINAL_CORPUS_COUNT - INITIAL_CORPUS_COUNT))
+    echo "Corpus count: $FINAL_CORPUS_COUNT"
+    echo "Corpus created: $NEW_CORPUS_FILES"
     echo ""
     
     # Check for crashes or leaks (both terminal output and log file)
