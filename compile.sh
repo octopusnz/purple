@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #=========================================================================
 #    Purple
 #    https://github.com/octopusnz/purple
@@ -7,8 +8,6 @@
 #    Description: Bash build script to assist with compiling
 #=========================================================================
 
-
-#!/usr/bin/env bash
 set -euo pipefail
 set -E
 # Ensure predictable field splitting
@@ -24,6 +23,8 @@ alias scan-build='/usr/local/bin/scan-build'
 # Check for mode
 DEBUG_MODE=false
 TEST_MODE=false
+FUZZ_MODE=false
+FUZZ_LONG_MODE=false
 if [ $# -gt 0 ]; then
     if [ "$1" = "--debug" ] || [ "$1" = "debug" ]; then
         DEBUG_MODE=true
@@ -31,6 +32,13 @@ if [ $# -gt 0 ]; then
     elif [ "$1" = "--test" ] || [ "$1" = "test" ]; then
         TEST_MODE=true
         echo "Building and running UNIT TESTS..."
+    elif [ "$1" = "--fuzz" ] || [ "$1" = "fuzz" ]; then
+        FUZZ_MODE=true
+        echo "Building coverage-guided FUZZ TESTING binaries..."
+    elif [ "$1" = "--fuzz-long" ] || [ "$1" = "fuzz-long" ]; then
+        FUZZ_MODE=true
+        FUZZ_LONG_MODE=true
+        echo "Building coverage-guided FUZZ TESTING binaries (extended 60-minute run)..."
     elif [ "$1" = "--clean" ] || [ "$1" = "clean" ]; then
         echo "Cleaning binaries and object files..."
         if [ -d build ]; then
@@ -41,10 +49,12 @@ if [ $# -gt 0 ]; then
         exit 0
     else
         echo "Error: Invalid argument '$1'"
-        echo "Usage: $0 [--debug|debug|--test|test|--clean|clean]"
+        echo "Usage: $0 [--debug|debug|--test|test|--fuzz|fuzz|--fuzz-long|fuzz-long|--clean|clean]"
         echo "  No arguments: Production build with optimizations"
         echo "  --debug or debug: Debug build with ASAN, UBSan, and Valgrind checks"
         echo "  --test or test: Build and run unit tests"
+        echo "  --fuzz or fuzz: Build and run coverage-guided fuzz testing (60s per target, 5 min total)"
+        echo "  --fuzz-long or fuzz-long: Extended fuzz testing (12 min per target, 60 min total)"
         echo "  --clean or clean: Remove all binaries and object files"
         exit 1
     fi
@@ -52,12 +62,10 @@ else
     echo "Building in PRODUCTION mode with optimizations..."
 fi
 
-# Create logs directory if it doesn't exist (only needed for debug mode)
-if [ "$DEBUG_MODE" = true ]; then
-    mkdir -p logs
-fi
-
+# Create directories if they don't exist
 mkdir -p build
+mkdir -p fuzz/corpus/
+mkdir -p logs
 
 if [ -f build/main ]; then
     echo "Removing old production binary..."
@@ -81,7 +89,6 @@ if [ -f main-ubsan ]; then
     echo "Removing old UBSan binary..."
     rm main-ubsan
 fi
-echo "Compiling with GCC...:"
 
 # Function to format elapsed time (shows ms if < 1s, otherwise seconds)
 format_elapsed_time() {
@@ -98,6 +105,7 @@ format_elapsed_time() {
 BUILD_START_TIME=$(date +%s%3N)
 if [ "$DEBUG_MODE" = true ]; then
     # Debug build with sanitizers
+    echo "Compiling with GCC..."
     GCC_LOG="logs/gcc_$(date +%Y-%m-%d_%H-%M-%S).log"
     {
         echo "=== GCC Compilation ==="
@@ -169,7 +177,7 @@ elif [ "$TEST_MODE" = true ]; then
         /usr/local/include/unity/unity.c test/test.c \
         -o build/test_runner -Wall -Wextra -Wpedantic -std=c99 -I. \
         -lraylib -lm -lpthread -ldl -lrt -lX11
-else
+elif [ "$FUZZ_MODE" = false ] && [ "$DEBUG_MODE" = false ] && [ "$TEST_MODE" = false ]; then
     # Production build with size optimizations
     gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main \
         -Wall -Wextra -Wpedantic -std=c99 -Os -s -flto \
@@ -350,10 +358,8 @@ if [ "$DEBUG_MODE" = true ]; then
     TOTAL_ELAPSED=$(format_elapsed_time "$TOTAL_ELAPSED_MS")
     echo ""
     echo "Total debug execution time: ${TOTAL_ELAPSED}"
-fi
 
-# Run tests if in test mode
-if [ "$TEST_MODE" = true ]; then
+elif [ "$TEST_MODE" = true ]; then
     echo ""
     echo "Running unit tests..."
     echo "===================="
@@ -361,9 +367,9 @@ if [ "$TEST_MODE" = true ]; then
     TEST_EXIT_CODE=$?
     echo "===================="
     if [ $TEST_EXIT_CODE -eq 0 ]; then
-        echo "✓ All tests passed!"
+        echo "All tests passed!"
     else
-        echo "✗ Tests failed with exit code $TEST_EXIT_CODE"
+        echo "Tests failed with exit code $TEST_EXIT_CODE"
         exit $TEST_EXIT_CODE
     fi
     TOTAL_END_TIME=$(date +%s%3N)
@@ -371,7 +377,183 @@ if [ "$TEST_MODE" = true ]; then
     TOTAL_ELAPSED=$(format_elapsed_time "$TOTAL_ELAPSED_MS")
     echo ""
     echo "Total test execution time: ${TOTAL_ELAPSED}"
-elif [ "$DEBUG_MODE" = false ] && [ "$TEST_MODE" = false ]; then
+
+elif [ "$FUZZ_MODE" = true ]; then
+    echo ""
+    echo "Compiling fuzz targets..."
+    
+    # Ensure clang is available for libFuzzer
+    if ! command -v clang &> /dev/null; then
+        echo "Error: clang is required for fuzzing. Please install clang."
+        exit 1
+    fi
+    
+    mkdir -p build/fuzz_artifacts
+    
+    FUZZ_LOG="logs/fuzz_$(date +%Y-%m-%d_%H-%M-%S).log"
+    {
+        echo "=== Fuzzing Campaign ==="
+        echo "Clang Version: $(clang --version | head -1)"
+        echo "Started: $(date)"
+        echo ""
+        echo "--- Building fuzz_ball_collision target ---"
+        clang ball.c fuzz/fuzz_ball_collision.c -o build/fuzz_ball_collision \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 2>&1
+        echo ""
+        echo "--- Building fuzz_paddle_position target ---"
+        clang paddle.c fuzz/fuzz_paddle_position.c -o build/fuzz_paddle_position \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 2>&1
+        echo ""
+        echo "--- Building fuzz_leaderboard target ---"
+        clang leaderboard.c fuzz/fuzz_leaderboard.c -o build/fuzz_leaderboard \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 2>&1
+        echo ""
+        echo "--- Building fuzz_ai_paddle target ---"
+        clang paddle.c fuzz/fuzz_ai_paddle.c -o build/fuzz_ai_paddle \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 2>&1
+        echo ""
+        echo "--- Building fuzz_game_physics target ---"
+        clang ball.c paddle.c fuzz/fuzz_game_physics.c -o build/fuzz_game_physics \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 2>&1
+        echo ""
+        # Set timeout based on mode: 60s for quick fuzz, 720s (12 min) for long fuzz
+        if [ "$FUZZ_LONG_MODE" = true ]; then
+            FUZZ_TIMEOUT=720
+            FUZZ_DESC="12 minutes"
+        else
+            FUZZ_TIMEOUT=60
+            FUZZ_DESC="60 seconds"
+        fi
+        echo "--- Running ball collision fuzzer ($FUZZ_DESC) ---"
+        timeout $FUZZ_TIMEOUT ./build/fuzz_ball_collision \
+            -max_len=44 \
+            -artifact_prefix=build/fuzz_artifacts/ball_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running paddle position fuzzer ($FUZZ_DESC) ---"
+        timeout $FUZZ_TIMEOUT ./build/fuzz_paddle_position \
+            -max_len=32 \
+            -artifact_prefix=build/fuzz_artifacts/paddle_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running leaderboard fuzzer ($FUZZ_DESC) ---"
+        timeout $FUZZ_TIMEOUT ./build/fuzz_leaderboard \
+            -max_len=80 \
+            -artifact_prefix=build/fuzz_artifacts/leaderboard_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running AI paddle fuzzer ($FUZZ_DESC) ---"
+        timeout $FUZZ_TIMEOUT ./build/fuzz_ai_paddle \
+            -max_len=32 \
+            -artifact_prefix=build/fuzz_artifacts/ai_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running game physics fuzzer ($FUZZ_DESC) ---"
+        timeout $FUZZ_TIMEOUT ./build/fuzz_game_physics \
+            -max_len=60 \
+            -artifact_prefix=build/fuzz_artifacts/physics_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "Completed: $(date)"
+    } > "$FUZZ_LOG" 2>&1
+    
+    # Clean up old fuzz log files (keep only 2 most recent)
+    # shellcheck disable=SC2012
+    if [ "$(ls logs/fuzz_*.log 2>/dev/null | wc -l)" -gt 2 ]; then
+        # shellcheck disable=SC2012
+        ls -t logs/fuzz_*.log | sed -n '3,$p' | while read -r file; do
+            rm "$file"
+        done
+    fi
+    
+    echo ""
+    
+    # Check for crashes or leaks (both terminal output and log file)
+    if [ -d build/fuzz_artifacts ]; then
+        CRASH_COUNT=$(find build/fuzz_artifacts -name "*crash-*" 2>/dev/null | wc -l)
+        LEAK_COUNT=$(find build/fuzz_artifacts -name "*leak-*" 2>/dev/null | wc -l)
+        
+        if [ "$CRASH_COUNT" -gt 0 ] || [ "$LEAK_COUNT" -gt 0 ]; then
+            echo "Fuzzer found issues:"
+            if [ "$CRASH_COUNT" -gt 0 ]; then
+                echo "  Crashes: $CRASH_COUNT"
+                find build/fuzz_artifacts -name "*crash-*" -type f -ls 2>/dev/null | head -5
+            fi
+            if [ "$LEAK_COUNT" -gt 0 ]; then
+                echo "  Memory leaks: $LEAK_COUNT"
+                find build/fuzz_artifacts -name "*leak-*" -type f -ls 2>/dev/null | head -5
+            fi
+            
+            # Append summary to log file
+            {
+                echo ""
+                echo "=== CRASH/LEAK SUMMARY ==="
+                if [ "$CRASH_COUNT" -gt 0 ]; then
+                    echo "Crashes detected: $CRASH_COUNT"
+                    ls -la build/fuzz_artifacts/*crash-* 2>/dev/null
+                fi
+                if [ "$LEAK_COUNT" -gt 0 ]; then
+                    echo "Memory leaks detected: $LEAK_COUNT"
+                    ls -la build/fuzz_artifacts/*leak-* 2>/dev/null
+                fi
+                echo ""
+                echo "=== RESULTS SUMMARY ==="
+                echo "Crashes: $CRASH_COUNT"
+                echo "Memory Leaks: $LEAK_COUNT"
+                echo "Status: FAIL - Issues detected"
+            } >> "$FUZZ_LOG"
+            
+            exit 1
+        else
+            echo "No crashes or leaks detected!"
+            
+            # Append success summary to log file
+            {
+                echo ""
+                echo "=== RESULTS SUMMARY ==="
+                echo "Crashes: 0"
+                echo "Memory Leaks: 0"
+                echo "Status: PASS - No issues detected"
+            } >> "$FUZZ_LOG"
+        fi
+    else
+        echo "Fuzzing completed without issues!"
+        
+        # Append status to log file
+        {
+            echo ""
+            echo "=== RESULTS SUMMARY ==="
+            echo "Status: PASS - No artifact directory created"
+        } >> "$FUZZ_LOG"
+    fi
+    
+    TOTAL_END_TIME=$(date +%s%3N)
+    TOTAL_ELAPSED_MS=$((TOTAL_END_TIME - BUILD_START_TIME))
+    TOTAL_ELAPSED=$(format_elapsed_time "$TOTAL_ELAPSED_MS")
+    echo ""
+    echo "Total fuzz execution time: ${TOTAL_ELAPSED}"
+
+elif [ "$DEBUG_MODE" = false ] && [ "$TEST_MODE" = false ] && [ "$FUZZ_MODE" = false ] && [ "$FUZZ_LONG_MODE" = false ]; then
     # Production mode total time
     TOTAL_END_TIME=$(date +%s%3N)
     TOTAL_ELAPSED_MS=$((TOTAL_END_TIME - BUILD_START_TIME))

@@ -24,8 +24,16 @@ void UpdatePaddlePosition(Paddle *paddle, int screenHeight)
     if (paddle->position.y < 0.0f) {
         paddle->position.y = 0.0f;
     }
-    if (paddle->position.y + paddle->height > (float)screenHeight) {
-        paddle->position.y = (float)screenHeight - paddle->height;
+    
+    // Calculate max Y position ensuring paddle height doesn't exceed screen
+    float maxY = (float)screenHeight - paddle->height;
+    if (maxY < 0.0f) {
+        // Paddle is larger than screen, clamp to top
+        maxY = 0.0f;
+    }
+    
+    if (paddle->position.y > maxY) {
+        paddle->position.y = maxY;
     }
 }
 

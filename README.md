@@ -2,15 +2,6 @@
 
 A classic Pong game implementation in C using Raylib, featuring AI opponent, dynamic difficulty, and persistent leaderboards.
 
-## Features
-
-- **Classic Pong Gameplay**: Play against an AI opponent with realistic physics
-- **Dynamic Difficulty**: Ball speed increases with total points scored
-- **Persistent Leaderboard**: Tracks the fastest wins (time to reach 5 points)
-- **Spin Mechanics**: Ball trajectory affected by paddle hit position
-- **Responsive AI**: Imperfect AI opponent for challenging but fair gameplay
-- **Custom Font**: Uses Orbitron variable font for clean, modern UI
-
 ## Requirements
 
 - GCC 15.2.0 or Clang (for compilation)
@@ -34,15 +25,7 @@ Produces an optimized binary at `build/main` with size optimizations and strippe
 ./compile.sh --debug
 ```
 
-Builds multiple variants with sanitizers and runs static analysis:
-
-- AddressSanitizer (ASAN) build
-- UndefinedBehaviorSanitizer (UBSan) build
-- Valgrind-compatible build
-- Clang compilation
-- Static analysis (cppcheck, clang-tidy, scan-build)
-
-All debug logs are saved to the `logs/` directory.
+Builds multiple variants with sanitizers and runs static analysis.
 
 ### Test Build
 
@@ -51,6 +34,15 @@ All debug logs are saved to the `logs/` directory.
 ```
 
 Compiles and runs the unit test suite using Unity framework.
+
+### Fuzz Testing
+
+```bash
+./compile.sh --fuzz       # Quick run: 60s per target (5 min total)
+./compile.sh --fuzz-long  # Extended run: 12 min per target (60 min total)
+```
+
+Runs coverage-guided fuzz testing on all game components using libFuzzer with AddressSanitizer and UndefinedBehaviorSanitizer.
 
 ### Clean Build
 
@@ -88,18 +80,80 @@ After building, run the game:
 
 ```text
 purple/
-├── main.c              # Game loop and rendering
-├── ball.c/h            # Ball physics and collision detection
-├── paddle.c/h          # Paddle movement and AI logic
-├── leaderboard.c/h     # Leaderboard persistence
-├── resource.c/h        # Resource file discovery
+├── main.c                   # Game loop, state management, and rendering
+├── ball.c/h                 # Ball physics and collision detection
+├── paddle.c/h               # Paddle movement and AI logic
+├── leaderboard.c/h          # Leaderboard persistence and sorting
+├── resource.c/h             # Resource file discovery with fallback paths
+├── compile.sh               # Build script with multiple modes (production/debug/test/fuzz)
+├── .github/
+│   └── copilot-instructions.md  # GitHub Copilot configuration
+├── fuzz/
+│   ├── corpus/              # Persistent fuzzing corpus (test cases)
+│   ├── fuzz_ball_collision.c      # Ball/paddle collision fuzzer
+│   ├── fuzz_paddle_position.c     # Paddle boundary fuzzer
+│   ├── fuzz_leaderboard.c         # Leaderboard sorting fuzzer
+│   ├── fuzz_ai_paddle.c           # AI decision making fuzzer
+│   └── fuzz_game_physics.c        # Multi-frame gameplay fuzzer
 ├── test/
-│   └── test.c          # Unit tests (Unity framework)
+│   └── test.c               # Unit tests (81 tests using Unity framework)
 ├── resources/
-│   └── orbitron/       # Orbitron font files
-├── build/              # Compiled binaries
-└── logs/               # Debug analysis logs
+│   ├── orbitron/            # Orbitron variable font files
+│   ├── RAY-LICENSE.txt      # Raylib license
+│   ├── UNITY-LICENSE.txt    # Unity test framework license
+│   └── OFL-LICENSE.txt      # Orbitron font license
+├── build/                   # Compiled binaries and artifacts
+│   ├── main                 # Production binary
+│   ├── test_runner          # Test suite binary
+│   ├── fuzz_*               # Fuzzing binaries (5 targets)
+│   └── fuzz_artifacts/      # Crash and leak reports from fuzzing
+└── logs/                    # Debug analysis logs (ASAN, UBSan, Valgrind, etc.)
 ```
+
+## Testing
+
+### Unit Tests
+
+The project includes 81 comprehensive unit tests covering:
+
+- Ball physics and collision detection
+- Paddle movement and boundary handling
+- AI paddle logic and edge cases
+- Leaderboard sorting and persistence
+- Resource file discovery
+- NaN/Inf handling and sanitization
+
+Run tests with:
+
+```bash
+./compile.sh --test
+```
+
+### Fuzz Test
+
+Five libFuzzer targets provide coverage-guided testing:
+
+1. **fuzz_ball_collision**: Tests ball/paddle collisions, spin mechanics, and pushback
+2. **fuzz_paddle_position**: Tests paddle boundary clamping with various sizes
+3. **fuzz_leaderboard**: Tests entry sorting, max capacity, and edge cases
+4. **fuzz_ai_paddle**: Tests AI decision making and movement
+5. **fuzz_game_physics**: Tests realistic multi-frame gameplay scenarios
+
+All fuzzers use AddressSanitizer and UndefinedBehaviorSanitizer for memory safety validation.
+
+### Debug Analysis
+
+Debug mode runs multiple static and dynamic analysis tools:
+
+- **GCC/Clang compilation** with all warnings enabled
+- **cppcheck**: Exhaustive static analysis
+- **clang-tidy**: Lint checks and best practices
+- **scan-build**: Clang static analyzer
+- **AddressSanitizer (ASAN)**: Memory error detection
+- **UndefinedBehaviorSanitizer (UBSan)**: Undefined behavior detection
+- **Valgrind**: Memory leak detection
+
+All logs are saved to `logs/` directory with timestamps.
 
 ## Leaderboard
 

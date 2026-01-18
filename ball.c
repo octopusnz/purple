@@ -82,7 +82,11 @@ void HandlePaddleCollision(Ball* ball, Vector2 paddlePosition,
     // Add spin based on where ball hits paddle (top/bottom adds vertical velocity)
     float paddleCenter = paddlePosition.y + paddleHeight / 2.0f;
     float hitPosition = ball->position.y - paddleCenter;
-    float spinFactor = hitPosition / (paddleHeight / 2.0f);  // Range: -1 to 1
-
-    ball->velocity.y += spinFactor * SPIN_EFFECT_MULTIPLIER;
+    
+    // Guard against division by zero for very small paddles
+    float halfHeight = paddleHeight / 2.0f;
+    if (halfHeight > 0.01f) {
+        float spinFactor = hitPosition / halfHeight;  // Range: -1 to 1
+        ball->velocity.y += spinFactor * SPIN_EFFECT_MULTIPLIER;
+    }
 }

@@ -1,5 +1,6 @@
-logs/
 build/
+fuzz/corpus/
+logs/
 .vscode/
 .github/
 .editorconfig
