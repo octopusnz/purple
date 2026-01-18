@@ -1,3 +1,13 @@
+#=========================================================================
+#    Purple
+#    https://github.com/octopusnz/purple
+#    Copyright (c) 2026 Jacob Doherty
+#    SPDX-License-Identifier: MIT
+#    File: compile.sh
+#    Description: Bash build script to assist with compiling
+#=========================================================================
+
+
 #!/usr/bin/env bash
 set -euo pipefail
 set -E

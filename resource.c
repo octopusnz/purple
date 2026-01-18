@@ -3,7 +3,6 @@
     https://github.com/octopusnz/purple
     Copyright (c) 2026 Jacob Doherty
     SPDX-License-Identifier: MIT
-    See LICENSE.txt for 3rd party library and other resource licenses.
     File: resource.c
     Description: Resource file location and discovery
 ========================================================================= */
