@@ -1,4 +1,5 @@
-Third party dependencies and content created by others have different licenses.
+Third party dependencies and content created by others have different licenses and
+copyrights. Please double check the specific
 
 RayLib: 
 https://www.raylib.com/ and https://github.com/raysan5/raylib

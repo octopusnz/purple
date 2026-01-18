@@ -1,3 +1,13 @@
+/* =========================================================================
+    Purple
+    https://github.com/octopusnz/purple
+    Copyright (c) 2026 Jacob Doherty
+    SPDX-License-Identifier: MIT
+    See LICENSE.txt for 3rd party library and other resource licenses.
+    File: leaderboard.h
+    Description: Leaderboard management (load, save, add entries)
+========================================================================= */
+
 #ifndef LEADERBOARD_H
 #define LEADERBOARD_H
 

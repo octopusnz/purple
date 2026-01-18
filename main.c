@@ -1,5 +1,17 @@
+/* =========================================================================
+    Purple
+    https://github.com/octopusnz/purple
+    Copyright (c) 2026 Jacob Doherty
+    SPDX-License-Identifier: MIT
+    See LICENSE.txt for 3rd party library and other resource licenses.
+    File: main.c
+    Description: Main game loop and rendering
+========================================================================= */
+
 #include <raylib/raylib.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 #include "ball.h"
 #include "paddle.h"
 #include "resource.h"
@@ -30,12 +42,20 @@ typedef enum {
     NAME_ENTRY
 } GameState;
 
+static float CalculateSpeedMultiplier(int totalScore)
+{
+    return 1.0f + (float)totalScore * SPEED_INCREMENT_PER_POINT;
+}
+
 static void ResetBall(Ball *ball, int screenWidth, int screenHeight, float speedMultiplier)
 {
     ball->position.x = (float)screenWidth / 2.0f;
     ball->position.y = (float)screenHeight / 2.0f;
-    ball->velocity.x = BALL_INITIAL_SPEED_X * speedMultiplier;
-    ball->velocity.y = BALL_INITIAL_SPEED_Y * speedMultiplier;
+    
+    // Randomize ball direction (50% chance to go left or right)
+    int direction = (rand() % 2 == 0) ? 1 : -1;
+    ball->velocity.x = BALL_INITIAL_SPEED_X * speedMultiplier * (float)direction;
+    ball->velocity.y = BALL_INITIAL_SPEED_Y * speedMultiplier * ((rand() % 2 == 0) ? 1.0f : -1.0f);
 }
 
 static void DrawPaddle(Paddle *paddle, Color colour)
@@ -53,6 +73,7 @@ static void DrawCenteredText(Font font, const char *text, int y, int fontSize, C
 int main(void)
 {
     // Initialization
+    srand((unsigned int)time(NULL));  // Seed random number generator
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Purple - Pong");
     SetTargetFPS(60);
 
@@ -146,13 +167,12 @@ int main(void)
             if (ball.position.x < 0.0f) {
                 // AI scores
                 ai.score++;
-                ballSpeedMultiplier = 1.0f + (float)(ai.score + player.score) * SPEED_INCREMENT_PER_POINT;
+                ballSpeedMultiplier = CalculateSpeedMultiplier(ai.score + player.score);
                 if (ai.score >= POINTS_TO_WIN) {
                     lastGameSeconds = (float)(GetTime() - gameStartTime);
                     // Save AI win automatically
                     AddLeaderboardEntry(&leaderboard, "AI", 'A', lastGameSeconds);
                     SaveLeaderboard(&leaderboard);
-                    // Go back to start screen
                     gameState = START_SCREEN;
                 } else {
                     ResetBall(&ball, SCREEN_WIDTH, SCREEN_HEIGHT, ballSpeedMultiplier);
@@ -160,8 +180,7 @@ int main(void)
             } else if (ball.position.x > SCREEN_WIDTH) {
                 // Player scores
                 player.score++;
-                ballSpeedMultiplier = 1.0f + (float)(ai.score + player.score)
-                                      * SPEED_INCREMENT_PER_POINT;
+                ballSpeedMultiplier = CalculateSpeedMultiplier(ai.score + player.score);
                 if (player.score >= POINTS_TO_WIN) {
                     lastGameSeconds = (float)(GetTime() - gameStartTime);
                     // Move to initials entry state
@@ -194,12 +213,9 @@ int main(void)
             if (IsKeyPressed(KEY_ENTER) && initialsCount > 0) {
                 AddLeaderboardEntry(&leaderboard, initials, 'P', lastGameSeconds);
                 SaveLeaderboard(&leaderboard);
-                // Return to start screen
                 gameState = START_SCREEN;
             }
         }
-
-        // Legacy game over restart via SPACE now handled in START_SCREEN
 
         // Draw
         BeginDrawing();
@@ -229,8 +245,8 @@ int main(void)
             }
             DrawCenteredText(orbitronFont, "Press SPACE to play",
                              SCREEN_HEIGHT - 80, MESSAGE_FONT_SIZE, DARKGRAY);
-        } else {
-            // Draw paddles and ball during gameplay or name entry
+        } else if (gameState == PLAYING) {
+            // Draw paddles and ball during gameplay
             DrawPaddle(&player, BLUE);
             DrawPaddle(&ai, RED);
             DrawCircleV(ball.position, ball.radius, PURPLE);
@@ -244,13 +260,8 @@ int main(void)
                        SCORE_FONT_SIZE, 1, BLUE);
             DrawTextEx(orbitronFont, aiScoreText,
                        (Vector2){SCREEN_WIDTH - 250, 80}, SCORE_FONT_SIZE, 1, RED);
-        }
-
-        // Draw FPS
-        DrawFPS(10, 10);
-
-        // Draw game state messages
-        if (gameState == NAME_ENTRY) {
+        } else if (gameState == NAME_ENTRY) {
+            // Only draw the win message and initials prompt
             DrawCenteredText(orbitronFont, "YOU WIN!", 220,
                              GAME_OVER_FONT_SIZE, GREEN);
             char prompt[64];
@@ -260,6 +271,9 @@ int main(void)
                              GAME_OVER_FONT_SIZE - 8, DARKGRAY);
             DrawCenteredText(orbitronFont, "Press ENTER to save", 340, MESSAGE_FONT_SIZE, GRAY);
         }
+
+        // Draw FPS
+        DrawFPS(10, 10);
 
         EndDrawing();
     }

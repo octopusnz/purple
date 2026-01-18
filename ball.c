@@ -1,8 +1,18 @@
+/* =========================================================================
+    Purple
+    https://github.com/octopusnz/purple
+    Copyright (c) 2026 Jacob Doherty
+    SPDX-License-Identifier: MIT
+    See LICENSE.txt for 3rd party library and other resource licenses.
+    File: ball.c
+    Description: Ball physics and collision detection
+========================================================================= */
+
 #include "ball.h"
 #include <stddef.h>
-#include <math.h>
 
 #define SPIN_EFFECT_MULTIPLIER 3.0f
+#define COLLISION_PUSHBACK 2.0f
 
 void UpdateBallPosition(Ball* ball) {
     if (ball == NULL) return;
@@ -60,6 +70,15 @@ void HandlePaddleCollision(Ball* ball, Vector2 paddlePosition,
 
     // Always reverse horizontal velocity on paddle collision
     ball->velocity.x *= -1.0f;
+
+    // Push ball out of collision to prevent sticking
+    if (ball->velocity.x > 0.0f) {
+        // Ball moving right, push to right edge of paddle
+        ball->position.x = paddlePosition.x + paddleWidth + ball->radius + COLLISION_PUSHBACK;
+    } else {
+        // Ball moving left, push to left edge of paddle
+        ball->position.x = paddlePosition.x - ball->radius - COLLISION_PUSHBACK;
+    }
 
     // Add spin based on where ball hits paddle (top/bottom adds vertical velocity)
     float paddleCenter = paddlePosition.y + paddleHeight / 2.0f;

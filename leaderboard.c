@@ -1,3 +1,13 @@
+/* =========================================================================
+    Purple
+    https://github.com/octopusnz/purple
+    Copyright (c) 2026 Jacob Doherty
+    SPDX-License-Identifier: MIT
+    See LICENSE.txt for 3rd party library and other resource licenses.
+    File: leaderboard.c
+    Description: Leaderboard management (load, save, add entries)
+========================================================================= */
+
 #include "leaderboard.h"
 #include <stdio.h>
 #include <string.h>
@@ -66,10 +76,14 @@ void LoadLeaderboard(Leaderboard *lb)
             LeaderboardEntry *e = &lb->entries[lb->count++];
             e->seconds = seconds;
             e->winner = (winner == 'A') ? 'A' : 'P';
-            // Initialize and copy up to 3 chars
-            e->initials[0] = e->initials[1] = e->initials[2] = '\0';
-            e->initials[3] = '\0';
-            strncpy(e->initials, initials, 3);
+            // Copy up to 3 chars and ensure null termination
+            size_t j = 0;
+            for (; j < 3 && initials[j] != '\0'; ++j) {
+                e->initials[j] = initials[j];
+            }
+            for (; j < 4; ++j) {
+                e->initials[j] = '\0';
+            }
         }
     }
     fclose(fp);
@@ -88,7 +102,7 @@ void SaveLeaderboard(const Leaderboard *lb)
     FILE *fp = fopen(path, "w");
     if (!fp) return;
 
-    for (size_t i = 0; i < lb->count && i < LEADERBOARD_MAX_ENTRIES; ++i) {
+    for (size_t i = 0; i < lb->count; ++i) {
         const LeaderboardEntry *e = &lb->entries[i];
         fprintf(fp, "%0.3f;%c;%s\n", (double)e->seconds, e->winner, e->initials);
     }
