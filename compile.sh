@@ -95,13 +95,26 @@ if [ "$DEBUG_MODE" = true ]; then
         echo "Started: $(date)"
         echo ""
         echo "--- Building main-asan ---"
-        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-asan -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion -Wsign-conversion -Wdouble-promotion -Wformat=2 -fno-omit-frame-pointer -fanalyzer -std=c99 -fsanitize=address -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-asan \
+            -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion \
+            -Wsign-conversion -Wdouble-promotion -Wformat=2 \
+            -fno-omit-frame-pointer -fanalyzer -std=c99 -fsanitize=address \
+            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
         echo ""
         echo "--- Building main-ubsan ---"
-        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-ubsan -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion -Wsign-conversion -Wdouble-promotion -Wformat=2 -fno-omit-frame-pointer -fanalyzer -std=c99 -fsanitize=undefined -fno-sanitize-recover=undefined -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-ubsan \
+            -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion \
+            -Wsign-conversion -Wdouble-promotion -Wformat=2 \
+            -fno-omit-frame-pointer -fanalyzer -std=c99 \
+            -fsanitize=undefined -fno-sanitize-recover=undefined \
+            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
         echo ""
         echo "--- Building main-valgrind ---"
-        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-valgrind -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion -Wsign-conversion -Wdouble-promotion -Wformat=2 -fno-omit-frame-pointer -fanalyzer -std=c99 -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-valgrind \
+            -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion \
+            -Wsign-conversion -Wdouble-promotion -Wformat=2 \
+            -fno-omit-frame-pointer -fanalyzer -std=c99 \
+            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
         echo ""
         echo "Completed: $(date)"
     } > "$GCC_LOG" 2>&1
@@ -123,7 +136,10 @@ if [ "$DEBUG_MODE" = true ]; then
         echo "Started: $(date)"
         echo ""
         echo "--- Building main-clang ---"
-        clang main.c ball.c paddle.c resource.c leaderboard.c -o build/main-clang -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion -Wsign-conversion -Wdouble-promotion -Wformat=2 -std=c99 -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+        clang main.c ball.c paddle.c resource.c leaderboard.c -o build/main-clang \
+            -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion \
+            -Wsign-conversion -Wdouble-promotion -Wformat=2 -std=c99 \
+            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
         echo ""
         echo "Completed: $(date)"
     } > "$CLANG_LOG" 2>&1
@@ -139,10 +155,18 @@ if [ "$DEBUG_MODE" = true ]; then
 elif [ "$TEST_MODE" = true ]; then
     # Test build
     echo "Compiling tests..."
-    gcc ball.c paddle.c resource.c leaderboard.c /usr/local/include/unity/unity.c test/test.c -o build/test_runner -Wall -Wextra -Wpedantic -std=c99 -I. -lraylib -lm -lpthread -ldl -lrt -lX11
+    gcc ball.c paddle.c resource.c leaderboard.c \
+        /usr/local/include/unity/unity.c test/test.c \
+        -o build/test_runner -Wall -Wextra -Wpedantic -std=c99 -I. \
+        -lraylib -lm -lpthread -ldl -lrt -lX11
 else
     # Production build with size optimizations
-    gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main -Wall -Wextra -Wpedantic -std=c99 -Os -s -flto -lraylib -lm -lpthread -ldl -lrt -lX11
+    gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main \
+        -Wall -Wextra -Wpedantic -std=c99 -Os -s -flto \
+        -ffunction-sections -fdata-sections -fomit-frame-pointer \
+        -fno-asynchronous-unwind-tables -fno-unwind-tables \
+        -Wl,--gc-sections -Wl,--as-needed -Wl,-O1 \
+        -lraylib -lm -lpthread -ldl -lrt -lX11
     strip --strip-all build/main
     echo "Production build complete"
 fi
@@ -157,7 +181,9 @@ if [ "$DEBUG_MODE" = true ]; then
         echo "Cppcheck Version: $(cppcheck --version)"
         echo "Started: $(date)"
         echo ""
-        cppcheck --check-level=exhaustive --enable=all --inconclusive --verbose --force --suppress=missingIncludeSystem --std=c99 --checkers-report="$CHECKERS_REPORT" main.c 2>&1 || true
+        cppcheck --check-level=exhaustive --enable=all --inconclusive \
+            --verbose --force --suppress=missingIncludeSystem --std=c99 \
+            --checkers-report="$CHECKERS_REPORT" main.c 2>&1 || true
         echo ""
         echo "=== Checkers Report ==="
         cat "$CHECKERS_REPORT"
@@ -182,7 +208,8 @@ if [ "$DEBUG_MODE" = true ]; then
         echo "Clang-Tidy Version: $(clang-tidy --version 2>&1 | grep -i 'version' | head -1)"
         echo "Started: $(date)"
         echo ""
-        clang-tidy main.c ball.c paddle.c resource.c leaderboard.c -- -std=c99 -I. -I/usr/include 2>&1 || true
+        clang-tidy main.c ball.c paddle.c resource.c leaderboard.c -- \
+            -std=c99 -I. -I/usr/include 2>&1 || true
         echo ""
         echo "Completed: $(date)"
     } > "$CLANGTIDY_LOG"
@@ -203,7 +230,9 @@ if [ "$DEBUG_MODE" = true ]; then
         echo "Clang Version: $(clang --version 2>&1 | grep -i 'version' | head -1)"
         echo "Started: $(date)"
         echo ""
-        scan-build -o build/scan-build-results gcc main.c ball.c paddle.c resource.c leaderboard.c -o /dev/null -std=c99 -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1 || true
+        scan-build -o build/scan-build-results gcc main.c ball.c paddle.c \
+            resource.c leaderboard.c -o /dev/null -std=c99 \
+            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1 || true
         echo ""
         echo "Completed: $(date)"
     } > "$SCANBUILD_LOG"

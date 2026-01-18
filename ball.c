@@ -19,7 +19,8 @@ int IsCollidingVertical(const Ball* ball, int screenHeight) {
 }
 
 // Check collision between ball and paddle (rectangle)
-static int IsCollidingPaddle(const Ball* ball, Vector2 paddlePosition, float paddleWidth, float paddleHeight)
+static int IsCollidingPaddle(const Ball* ball, Vector2 paddlePosition,
+                              float paddleWidth, float paddleHeight)
 {
     if (ball == NULL) return 0;
 
@@ -48,7 +49,8 @@ static int IsCollidingPaddle(const Ball* ball, Vector2 paddlePosition, float pad
 }
 
 // Handle paddle collision and deflect ball
-void HandlePaddleCollision(Ball* ball, Vector2 paddlePosition, float paddleWidth, float paddleHeight)
+void HandlePaddleCollision(Ball* ball, Vector2 paddlePosition,
+                           float paddleWidth, float paddleHeight)
 {
     if (ball == NULL) return;
 

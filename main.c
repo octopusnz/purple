@@ -77,7 +77,8 @@ int main(void)
 
     // Initialize AI paddle (right side)
     Paddle ai = {
-        .position = { (float)SCREEN_WIDTH - PADDLE_WIDTH - PADDLE_OFFSET, (float)(SCREEN_HEIGHT - PADDLE_HEIGHT) / 2.0f },
+        .position = { (float)SCREEN_WIDTH - PADDLE_WIDTH - PADDLE_OFFSET,
+                      (float)(SCREEN_HEIGHT - PADDLE_HEIGHT) / 2.0f },
         .width = PADDLE_WIDTH,
         .height = PADDLE_HEIGHT,
         .velocity = 0.0f,
@@ -159,7 +160,8 @@ int main(void)
             } else if (ball.position.x > SCREEN_WIDTH) {
                 // Player scores
                 player.score++;
-                ballSpeedMultiplier = 1.0f + (float)(ai.score + player.score) * SPEED_INCREMENT_PER_POINT;
+                ballSpeedMultiplier = 1.0f + (float)(ai.score + player.score)
+                                      * SPEED_INCREMENT_PER_POINT;
                 if (player.score >= POINTS_TO_WIN) {
                     lastGameSeconds = (float)(GetTime() - gameStartTime);
                     // Move to initials entry state
@@ -219,10 +221,14 @@ int main(void)
             for (size_t i = 0; i < leaderboard.count; ++i) {
                 const LeaderboardEntry *e = &leaderboard.entries[i];
                 char line[128];
-                snprintf(line, sizeof(line), "%2zu. %6.3fs  %c  %s", i + 1, (double)e->seconds, e->winner, e->initials);
-                DrawCenteredText(orbitronFont, line, startY + (int)i * 30, MESSAGE_FONT_SIZE, BLACK);
+                snprintf(line, sizeof(line), "%2zu. %6.3fs  %c  %s",
+                         i + 1, (double)e->seconds, e->winner, e->initials);
+                DrawCenteredText(orbitronFont, line, startY + (int)i * 30,
+                                
+                                 MESSAGE_FONT_SIZE, BLACK);
             }
-            DrawCenteredText(orbitronFont, "Press SPACE to play", SCREEN_HEIGHT - 80, MESSAGE_FONT_SIZE, DARKGRAY);
+            DrawCenteredText(orbitronFont, "Press SPACE to play",
+                             SCREEN_HEIGHT - 80, MESSAGE_FONT_SIZE, DARKGRAY);
         } else {
             // Draw paddles and ball during gameplay or name entry
             DrawPaddle(&player, BLUE);
@@ -234,8 +240,10 @@ int main(void)
             snprintf(playerScoreText, sizeof(playerScoreText), "Player: %d", player.score);
             snprintf(aiScoreText, sizeof(aiScoreText), "AI: %d", ai.score);
 
-            DrawTextEx(orbitronFont, playerScoreText, (Vector2){50, 80}, SCORE_FONT_SIZE, 1, BLUE);
-            DrawTextEx(orbitronFont, aiScoreText, (Vector2){SCREEN_WIDTH - 250, 80}, SCORE_FONT_SIZE, 1, RED);
+            DrawTextEx(orbitronFont, playerScoreText, (Vector2){50, 80},
+                       SCORE_FONT_SIZE, 1, BLUE);
+            DrawTextEx(orbitronFont, aiScoreText,
+                       (Vector2){SCREEN_WIDTH - 250, 80}, SCORE_FONT_SIZE, 1, RED);
         }
 
         // Draw FPS
@@ -243,10 +251,13 @@ int main(void)
 
         // Draw game state messages
         if (gameState == NAME_ENTRY) {
-            DrawCenteredText(orbitronFont, "YOU WIN!", 220, GAME_OVER_FONT_SIZE, GREEN);
+            DrawCenteredText(orbitronFont, "YOU WIN!", 220,
+                             GAME_OVER_FONT_SIZE, GREEN);
             char prompt[64];
-            snprintf(prompt, sizeof(prompt), "Enter Initials: %c%c%c", initials[0], initials[1], initials[2]);
-            DrawCenteredText(orbitronFont, prompt, 280, GAME_OVER_FONT_SIZE - 8, DARKGRAY);
+            snprintf(prompt, sizeof(prompt), "Enter Initials: %c%c%c",
+                     initials[0], initials[1], initials[2]);
+            DrawCenteredText(orbitronFont, prompt, 280,
+                             GAME_OVER_FONT_SIZE - 8, DARKGRAY);
             DrawCenteredText(orbitronFont, "Press ENTER to save", 340, MESSAGE_FONT_SIZE, GRAY);
         }
 

@@ -2,3 +2,4 @@ logs/
 build/
 .vscode/
 .github/
+.editorconfig

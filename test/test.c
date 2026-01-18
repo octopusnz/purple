@@ -1,8 +1,14 @@
+#define _DEFAULT_SOURCE
+#define _XOPEN_SOURCE 700
 #include "unity/unity.h"
 #include "../ball.h"
 #include "../paddle.h"
+#include "../leaderboard.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 void setUp(void) {
     // Set up before each test
@@ -455,13 +461,106 @@ void test_FontFile_IsTTFFormat(void) {
         unsigned char header[4];
         size_t read = fread(header, 1, 4, fp);
         TEST_ASSERT_EQUAL_INT(4, read);
-        // TTF files start with either 0x00 0x01 0x00 0x00 or "OTTO" or "true"
-        int valid = (header[0] == 0x00 && header[1] == 0x01 && header[2] == 0x00 && header[3] == 0x00) ||
-                    (header[0] == 'O' && header[1] == 'T' && header[2] == 'T' && header[3] == 'O') ||
-                    (header[0] == 't' && header[1] == 'r' && header[2] == 'u' && header[3] == 'e');
+        // TTF files start with 0x00 0x01 0x00 0x00 or "OTTO" or "true"
+        int valid = (header[0] == 0x00 && header[1] == 0x01 &&
+                     header[2] == 0x00 && header[3] == 0x00) ||
+                    (header[0] == 'O' && header[1] == 'T' &&
+                     header[2] == 'T' && header[3] == 'O') ||
+                    (header[0] == 't' && header[1] == 'r' &&
+                     header[2] == 'u' && header[3] == 'e');
         TEST_ASSERT_TRUE(valid);
         fclose(fp);
     }
+}
+
+// Helpers for leaderboard tests
+static char *create_temp_home(char *templateBuf, size_t bufSize) {
+    if (bufSize < 1) return NULL;
+    snprintf(templateBuf, bufSize, "/tmp/purpletestXXXXXX");
+    return mkdtemp(templateBuf);
+}
+
+static void cleanup_temp_home(const char *homePath) {
+    if (!homePath) return;
+    char lbDir[600];
+    char lbPath[600];
+    int dirLen = snprintf(lbDir, sizeof(lbDir), "%s/.purple", homePath);
+    int pathLen = snprintf(lbPath, sizeof(lbPath), "%s/leaderboard.txt", lbDir);
+    if (dirLen > 0 && dirLen < (int)sizeof(lbDir)) {
+        if (pathLen > 0 && pathLen < (int)sizeof(lbPath)) {
+            remove(lbPath);
+        }
+        rmdir(lbDir);
+    }
+    rmdir(homePath);
+}
+
+void test_AddLeaderboardEntry_UppercasesAndStores(void) {
+    Leaderboard lb = {0};
+    AddLeaderboardEntry(&lb, "abc", 'p', 12.5f);
+
+    TEST_ASSERT_EQUAL_UINT32(1, lb.count);
+    TEST_ASSERT_EQUAL_CHAR('P', lb.entries[0].winner);
+    TEST_ASSERT_EQUAL_STRING_LEN("ABC", lb.entries[0].initials, 3);
+    TEST_ASSERT_EQUAL_FLOAT(12.5f, lb.entries[0].seconds);
+}
+
+void test_AddLeaderboardEntry_ReplacesWorstWhenFull(void) {
+    Leaderboard lb = {0};
+    for (int i = 0; i < (int)LEADERBOARD_MAX_ENTRIES; ++i) {
+        float seconds = (float)((i + 1) * 10);  // 10,20,...,100
+        AddLeaderboardEntry(&lb, "AAA", 'P', seconds);
+    }
+
+    // Add a faster time; should evict the worst (100)
+    AddLeaderboardEntry(&lb, "BBB", 'A', 5.0f);
+
+    TEST_ASSERT_EQUAL_UINT32(LEADERBOARD_MAX_ENTRIES, lb.count);
+    // Fastest should be 5.0, slowest should now be 90.0
+    TEST_ASSERT_EQUAL_FLOAT(5.0f, lb.entries[0].seconds);
+    TEST_ASSERT_EQUAL_FLOAT(90.0f, lb.entries[lb.count - 1].seconds);
+}
+
+void test_AddLeaderboardEntry_IgnoresSlowerThanWorst(void) {
+    Leaderboard lb = {0};
+    for (int i = 0; i < (int)LEADERBOARD_MAX_ENTRIES; ++i) {
+        AddLeaderboardEntry(&lb, "AAA", 'P', (float)(i + 1));
+    }
+
+    AddLeaderboardEntry(&lb, "ZZZ", 'P', 50.0f);
+
+    TEST_ASSERT_EQUAL_UINT32(LEADERBOARD_MAX_ENTRIES, lb.count);
+    // Ensure 50.0 did not enter list (max existing is 10.0)
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 10.0f, lb.entries[lb.count - 1].seconds);
+}
+
+void test_SaveAndLoadLeaderboard_PersistsSorted(void) {
+    char tempHome[64];
+    char *homePath = create_temp_home(tempHome, sizeof(tempHome));
+    TEST_ASSERT_NOT_NULL(homePath);
+
+    const char *oldHome = getenv("HOME");
+    setenv("HOME", homePath, 1);
+
+    Leaderboard lb = {0};
+    AddLeaderboardEntry(&lb, "CCC", 'P', 30.0f);
+    AddLeaderboardEntry(&lb, "DDD", 'A', 10.0f);
+    AddLeaderboardEntry(&lb, "EEE", 'P', 20.0f);
+    SaveLeaderboard(&lb);
+
+    Leaderboard loaded = {0};
+    LoadLeaderboard(&loaded);
+
+    TEST_ASSERT_EQUAL_UINT32(3, loaded.count);
+    TEST_ASSERT_EQUAL_FLOAT(10.0f, loaded.entries[0].seconds);
+    TEST_ASSERT_EQUAL_CHAR('A', loaded.entries[0].winner);
+    TEST_ASSERT_EQUAL_STRING_LEN("DDD", loaded.entries[0].initials, 3);
+    TEST_ASSERT_EQUAL_FLOAT(30.0f, loaded.entries[loaded.count - 1].seconds);
+
+    if (oldHome) {
+        setenv("HOME", oldHome, 1);
+    }
+    cleanup_temp_home(homePath);
 }
 
 int main(void) {
@@ -509,6 +608,12 @@ int main(void) {
     RUN_TEST(test_FontFile_IsReadable);
     RUN_TEST(test_FontFile_HasValidSize);
     RUN_TEST(test_FontFile_IsTTFFormat);
+
+    // Leaderboard tests
+    RUN_TEST(test_AddLeaderboardEntry_UppercasesAndStores);
+    RUN_TEST(test_AddLeaderboardEntry_ReplacesWorstWhenFull);
+    RUN_TEST(test_AddLeaderboardEntry_IgnoresSlowerThanWorst);
+    RUN_TEST(test_SaveAndLoadLeaderboard_PersistsSorted);
     
     return UNITY_END();
 }
