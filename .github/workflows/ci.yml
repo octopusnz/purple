@@ -80,16 +80,29 @@ jobs:
           cp Unity/src/unity.h /usr/local/include/unity/
           cp Unity/src/unity_internals.h /usr/local/include/unity/
       
-      - name: Build production binary (Ubuntu/macOS)
-        if: runner.os != 'Windows'
+      - name: Build production binary (Ubuntu)
+        if: runner.os == 'Linux'
         run: |
+          mkdir -p build
           gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main \
             -Wall -Wextra -Wpedantic -std=c99 -Os -s -flto \
             -ffunction-sections -fdata-sections -fomit-frame-pointer \
             -fno-asynchronous-unwind-tables -fno-unwind-tables \
             -Wl,--gc-sections -Wl,--as-needed -Wl,-O1 \
-            -lraylib -lm -lpthread -ldl $([ "$(uname)" = "Linux" ] && echo "-lrt -lX11" || echo "")
-          strip --strip-all build/main || strip -x build/main
+            -lraylib -lm -lpthread -ldl -lrt -lX11
+          strip --strip-all build/main
+      
+      - name: Build production binary (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p build
+          gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main \
+            -Wall -Wextra -Wpedantic -std=c99 -Os -s -flto \
+            -ffunction-sections -fdata-sections -fomit-frame-pointer \
+            -fno-asynchronous-unwind-tables -fno-unwind-tables \
+            -Wl,-dead_strip \
+            -lraylib -lm -lpthread -ldl
+          strip -x build/main
       
       - name: Build production binary (Windows)
         if: runner.os == 'Windows'
@@ -104,13 +117,22 @@ jobs:
             -lraylib -lopengl32 -lgdi32 -lwinmm
           strip --strip-all build/main.exe
       
-      - name: Build and run tests (Ubuntu/macOS)
-        if: runner.os != 'Windows'
+      - name: Build and run tests (Ubuntu)
+        if: runner.os == 'Linux'
         run: |
           gcc ball.c paddle.c resource.c leaderboard.c \
             /usr/local/include/unity/unity.c test/test.c \
             -o build/test_runner -Wall -Wextra -Wpedantic -std=c99 -I. \
-            -lraylib -lm -lpthread -ldl $([ "$(uname)" = "Linux" ] && echo "-lrt -lX11" || echo "")
+            -lraylib -lm -lpthread -ldl -lrt -lX11
+          ./build/test_runner
+      
+      - name: Build and run tests (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          gcc ball.c paddle.c resource.c leaderboard.c \
+            /usr/local/include/unity/unity.c test/test.c \
+            -o build/test_runner -Wall -Wextra -Wpedantic -std=c99 -I. \
+            -lraylib -lm -lpthread -ldl
           ./build/test_runner
       
       - name: Build and run tests (Windows)
