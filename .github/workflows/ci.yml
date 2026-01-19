@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libx11-dev libxrandr-dev libxi-dev \
+            libgl1-mesa-dev libglu1-mesa-dev libxcursor-dev libxinerama-dev \
+            libwayland-dev libxkbcommon-dev
+          
+          # Install Raylib from source
+          cd /tmp
+          git clone --depth 1 --branch 5.0 https://github.com/raysan5/raylib.git
+          cd raylib/src
+          make PLATFORM=PLATFORM_DESKTOP
+          sudo make install PLATFORM=PLATFORM_DESKTOP
+          
+          # Install Unity test framework
+          cd /tmp
+          git clone --depth 1 https://github.com/ThrowTheSwitch/Unity.git
+          sudo mkdir -p /usr/local/include/unity
+          sudo cp Unity/src/unity.c /usr/local/include/unity/
+          sudo cp Unity/src/unity.h /usr/local/include/unity/
+          sudo cp Unity/src/unity_internals.h /usr/local/include/unity/
+      
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # Install Raylib from source
+          cd /tmp
+          git clone --depth 1 --branch 5.0 https://github.com/raysan5/raylib.git
+          cd raylib/src
+          make PLATFORM=PLATFORM_DESKTOP
+          sudo make install PLATFORM=PLATFORM_DESKTOP
+          
+          # Install Unity test framework
+          cd /tmp
+          git clone --depth 1 https://github.com/ThrowTheSwitch/Unity.git
+          sudo mkdir -p /usr/local/include/unity
+          sudo cp Unity/src/unity.c /usr/local/include/unity/
+          sudo cp Unity/src/unity.h /usr/local/include/unity/
+          sudo cp Unity/src/unity_internals.h /usr/local/include/unity/
+      
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # Install Raylib from source using MinGW
+          cd /tmp
+          git clone --depth 1 --branch 5.0 https://github.com/raysan5/raylib.git
+          cd raylib/src
+          make PLATFORM=PLATFORM_DESKTOP CC=gcc
+          make install PLATFORM=PLATFORM_DESKTOP
+          
+          # Install Unity test framework
+          cd /tmp
+          git clone --depth 1 https://github.com/ThrowTheSwitch/Unity.git
+          mkdir -p /usr/local/include/unity
+          cp Unity/src/unity.c /usr/local/include/unity/
+          cp Unity/src/unity.h /usr/local/include/unity/
+          cp Unity/src/unity_internals.h /usr/local/include/unity/
+      
+      - name: Build production binary (Ubuntu/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main \
+            -Wall -Wextra -Wpedantic -std=c99 -Os -s -flto \
+            -ffunction-sections -fdata-sections -fomit-frame-pointer \
+            -fno-asynchronous-unwind-tables -fno-unwind-tables \
+            -Wl,--gc-sections -Wl,--as-needed -Wl,-O1 \
+            -lraylib -lm -lpthread -ldl $([ "$(uname)" = "Linux" ] && echo "-lrt -lX11" || echo "")
+          strip --strip-all build/main || strip -x build/main
+      
+      - name: Build production binary (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p build
+          gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main.exe \
+            -Wall -Wextra -Wpedantic -std=c99 -Os -s -flto \
+            -ffunction-sections -fdata-sections -fomit-frame-pointer \
+            -fno-asynchronous-unwind-tables -fno-unwind-tables \
+            -Wl,--gc-sections -Wl,--as-needed -Wl,-O1 \
+            -lraylib -lopengl32 -lgdi32 -lwinmm
+          strip --strip-all build/main.exe
+      
+      - name: Build and run tests (Ubuntu/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          gcc ball.c paddle.c resource.c leaderboard.c \
+            /usr/local/include/unity/unity.c test/test.c \
+            -o build/test_runner -Wall -Wextra -Wpedantic -std=c99 -I. \
+            -lraylib -lm -lpthread -ldl $([ "$(uname)" = "Linux" ] && echo "-lrt -lX11" || echo "")
+          ./build/test_runner
+      
+      - name: Build and run tests (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          gcc ball.c paddle.c resource.c leaderboard.c \
+            /usr/local/include/unity/unity.c test/test.c \
+            -o build/test_runner.exe -Wall -Wextra -Wpedantic -std=c99 -I. \
+            -lraylib -lopengl32 -lgdi32 -lwinmm
+          ./build/test_runner.exe
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: purple-${{ matrix.os }}
+          path: |
+            build/main*
+            build/test_runner*
