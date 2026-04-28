@@ -47,6 +47,7 @@ const char* FindResourceDirectory(void)
 const char* FindResourceFile(const char *resourceSubpath)
 {
     static char fullPath[MAX_PATH_LENGTH];
+    if (!resourceSubpath) return "./resources";
     const char *resourceDir = FindResourceDirectory();
     snprintf(fullPath, sizeof(fullPath), "%s/%s", resourceDir, resourceSubpath);
     return fullPath;

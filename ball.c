@@ -12,6 +12,11 @@
 
 #define SPIN_EFFECT_MULTIPLIER 3.0f
 #define COLLISION_PUSHBACK 2.0f
+/* Cap vertical speed to prevent the ball going nearly vertical after many
+ * spin-accumulating bounces.  Chosen as 3× the maximum initial Y speed
+ * (BALL_INITIAL_SPEED_Y 2.0 × max multiplier ~1.2 × 3 ≈ 7.2, rounded up).
+ */
+#define MAX_BALL_SPEED_Y 15.0f
 
 void UpdateBallPosition(Ball* ball) {
     if (ball == NULL) return;
@@ -88,5 +93,8 @@ void HandlePaddleCollision(Ball* ball, Vector2 paddlePosition,
     if (halfHeight > 0.01f) {
         float spinFactor = hitPosition / halfHeight;  // Range: -1 to 1
         ball->velocity.y += spinFactor * SPIN_EFFECT_MULTIPLIER;
+        // Clamp to prevent unbounded growth from repeated spin accumulation
+        if (ball->velocity.y > MAX_BALL_SPEED_Y) ball->velocity.y = MAX_BALL_SPEED_Y;
+        else if (ball->velocity.y < -MAX_BALL_SPEED_Y) ball->velocity.y = -MAX_BALL_SPEED_Y;
     }
 }

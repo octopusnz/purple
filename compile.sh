@@ -101,6 +101,55 @@ format_elapsed_time() {
     fi
 }
 
+# Display a live progress line to /dev/tty while the fuzz log is being written.
+# Reads the growing log file to report the current target and elapsed time.
+# Run in the background; kill the PID when the fuzzing block completes.
+# Arguments: <log_file> <total_run_targets> <timeout_per_target_seconds>
+fuzz_progress() {
+    set +euo pipefail  # Never let a failed grep/sed kill the indicator
+    local log_file="$1"
+    local total="$2"
+    local timeout_each="$3"
+    local total_seconds=$(( timeout_each * total ))
+    local start sp elapsed remaining label completed last_target spin eta_str
+    local spinners='/-\|'
+    start=$(date +%s)
+    sp=0
+
+    while true; do
+        elapsed=$(( $(date +%s) - start ))
+        spin="${spinners:$(( sp % 4 )):1}"
+        sp=$(( sp + 1 ))
+
+        completed=0
+        last_target=""
+        if [ -f "$log_file" ]; then
+            completed=$(grep -c "^--- Running" "$log_file" 2>/dev/null)
+            last_target=$(grep "^--- Running" "$log_file" 2>/dev/null | tail -1 \
+                | sed 's/^--- Running \(.*\) fuzzer.*/\1/')
+        fi
+
+        if [ -n "$last_target" ]; then
+            label="[${completed}/${total}] Running: ${last_target}"
+        else
+            label="Building targets"
+        fi
+
+        remaining=$(( total_seconds - elapsed ))
+        if [ "$remaining" -le 0 ]; then
+            eta_str="finishing..."
+        elif [ "$remaining" -ge 60 ]; then
+            eta_str="~$(( remaining / 60 ))m$(( remaining % 60 ))s remaining"
+        else
+            eta_str="~${remaining}s remaining"
+        fi
+
+        printf '\r  [%s] %-52s %ds elapsed, %s' \
+            "$spin" "$label" "$elapsed" "$eta_str" >/dev/tty
+        sleep 1
+    done
+}
+
 # Set compilation flags based on mode
 BUILD_START_TIME=$(date +%s%3N)
 if [ "$DEBUG_MODE" = true ]; then
@@ -331,7 +380,7 @@ if [ "$DEBUG_MODE" = true ]; then
         echo "Valgrind Version: $(valgrind --version)"
         echo "Started: $(date)"
         echo ""
-        timeout 5 valgrind --leak-check=full -s ./build/main-valgrind 2>&1 || true
+        timeout 5 valgrind --leak-check=full -s --suppressions=valgrind.supp ./build/main-valgrind 2>&1 || true
         echo ""
         echo "=== Analysis Complete ==="
     } > "$VALGRIND_LOG" 2>&1
@@ -391,6 +440,20 @@ elif [ "$FUZZ_MODE" = true ]; then
     mkdir -p build/fuzz_artifacts
     
     FUZZ_LOG="logs/fuzz_$(date +%Y-%m-%d_%H-%M-%S).log"
+
+    # Determine timeout now (in the parent shell) so fuzz_progress can compute ETA
+    if [ "$FUZZ_LONG_MODE" = true ]; then
+        FUZZ_TIMEOUT=720
+        FUZZ_DESC="12 minutes"
+    else
+        FUZZ_TIMEOUT=60
+        FUZZ_DESC="60 seconds"
+    fi
+
+    # Start the live progress indicator (writes to /dev/tty, not the log)
+    fuzz_progress "$FUZZ_LOG" 7 "$FUZZ_TIMEOUT" &
+    FUZZ_PROGRESS_PID=$!
+
     {
         echo "=== Fuzzing Campaign ==="
         echo "Clang Version: $(clang --version | head -1)"
@@ -426,18 +489,22 @@ elif [ "$FUZZ_MODE" = true ]; then
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 2>&1
         echo ""
+        echo "--- Building fuzz_leaderboard_load target ---"
+        clang leaderboard.c fuzz/fuzz_leaderboard_load.c -o build/fuzz_leaderboard_load \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
+        echo ""
+        echo "--- Building fuzz_resource_path target ---"
+        clang resource.c fuzz/fuzz_resource_path.c -o build/fuzz_resource_path \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 2>&1
+        echo ""
         # Count initial corpus files
         INITIAL_CORPUS_COUNT=$(find fuzz/corpus -type f 2>/dev/null | wc -l)
         echo "Corpus count: $INITIAL_CORPUS_COUNT"
         echo ""
-        # Set timeout based on mode: 60s for quick fuzz, 720s (12 min) for long fuzz
-        if [ "$FUZZ_LONG_MODE" = true ]; then
-            FUZZ_TIMEOUT=720
-            FUZZ_DESC="12 minutes"
-        else
-            FUZZ_TIMEOUT=60
-            FUZZ_DESC="60 seconds"
-        fi
         echo "--- Running ball collision fuzzer ($FUZZ_DESC) ---"
         timeout $FUZZ_TIMEOUT ./build/fuzz_ball_collision \
             -max_len=44 \
@@ -478,6 +545,22 @@ elif [ "$FUZZ_MODE" = true ]; then
             -timeout=2 \
             fuzz/corpus/ 2>&1 || true
         echo ""
+        echo "--- Running leaderboard load fuzzer ($FUZZ_DESC) ---"
+        timeout $FUZZ_TIMEOUT ./build/fuzz_leaderboard_load \
+            -max_len=2048 \
+            -artifact_prefix=build/fuzz_artifacts/lb_load_ \
+            -use_value_profile=1 \
+            -timeout=5 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running resource path fuzzer ($FUZZ_DESC) ---"
+        timeout $FUZZ_TIMEOUT ./build/fuzz_resource_path \
+            -max_len=512 \
+            -artifact_prefix=build/fuzz_artifacts/resource_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
         # Count final corpus files and display statistics
         FINAL_CORPUS_COUNT=$(find fuzz/corpus -type f 2>/dev/null | wc -l)
         NEW_CORPUS_FILES=$((FINAL_CORPUS_COUNT - INITIAL_CORPUS_COUNT))
@@ -486,6 +569,12 @@ elif [ "$FUZZ_MODE" = true ]; then
         echo ""
         echo "Completed: $(date)"
     } > "$FUZZ_LOG" 2>&1
+
+    # Stop the progress indicator and clear its line
+    kill "$FUZZ_PROGRESS_PID" 2>/dev/null || true
+    wait "$FUZZ_PROGRESS_PID" 2>/dev/null || true
+    printf '\r%-80s\r' '' >/dev/tty
+    echo "Fuzzing complete."
     
     # Clean up old fuzz log files (keep only 2 most recent)
     # shellcheck disable=SC2012

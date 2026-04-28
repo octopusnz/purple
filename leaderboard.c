@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -72,6 +73,12 @@ void LoadLeaderboard(Leaderboard *lb)
         char winner = 'P';
         float seconds = 0.0f;
         if (sscanf(line, "%f;%c;%7s", &seconds, &winner, initials) == 3) {
+            /* Reject non-finite or negative times: sscanf on POSIX parses
+             * "nan", "inf", and negative values as valid floats.  A NaN in
+             * the comparator makes qsort non-transitive (undefined behaviour);
+             * a negative time is not a valid game result.
+             */
+            if (!isfinite(seconds) || seconds < 0.0f) continue;
             LeaderboardEntry *e = &lb->entries[lb->count++];
             e->seconds = seconds;
             e->winner = (winner == 'A') ? 'A' : 'P';

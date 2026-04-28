@@ -1,0 +1,63 @@
+# Valgrind suppressions for purple
+# Suppresses known false positives from system libraries (OpenGL dispatch,
+# glibc dynamic linker) that are unrelated to our code.
+
+# libGLdispatch one-time global allocation during dlopen initialisation.
+{
+   libGLdispatch_init
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:malloc
+   ...
+   fun:__glDispatchInit
+   ...
+}
+
+# glibc dynamic linker bookkeeping (_dl_find_object_update) during dlopen.
+{
+   glibc_dl_find_object_update
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:malloc
+   ...
+   fun:_dl_find_object_update
+   ...
+}
+
+# LLVM command-line option singleton registered during dlopen initialisation
+# (llvm::cl::Option::addArgument). LLVM intentionally never frees these
+# static globals — not a leak in our code.
+{
+   libLLVM_cl_option_addArgument
+   Memcheck:Leak
+   match-leak-kinds: definite
+   ...
+   fun:_ZN4llvm2cl6Option11addArgumentEv
+   ...
+}
+
+# Mesa libGLX_mesa internal state allocated during _glfwInitGLX (GLX
+# context setup). Mesa holds interior pointers into these blocks; they
+# are not freed at exit by design — not a leak in our code.
+{
+   libGLX_mesa_glfwInitGLX
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:malloc
+   ...
+   fun:_glfwInitGLX
+   ...
+}
+
+# Mesa/Gallium DRI internal state allocated during driCreateNewScreen3
+# (GPU screen/context initialisation). All frames are in libgallium and
+# libGLX_mesa — not our code.
+{
+   libgallium_driCreateNewScreen3
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:malloc
+   ...
+   fun:driCreateNewScreen3
+   ...
+}

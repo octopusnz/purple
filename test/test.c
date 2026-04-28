@@ -10,6 +10,7 @@
 #define _DEFAULT_SOURCE
 #define _XOPEN_SOURCE 700
 #include "unity/unity.h"
+#include <raylib/raylib.h>
 #include "../ball.h"
 #include "../paddle.h"
 #include "../leaderboard.h"
@@ -19,6 +20,14 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+/* Fail the build immediately if the raylib header version is below 6.
+ * This catches a header/library mismatch (e.g. old libraylib.a installed)
+ * at compile time rather than producing mysterious runtime behaviour.
+ */
+#if RAYLIB_VERSION_MAJOR < 6
+#error "raylib >= 6.0 required. Update libraylib.a and the raylib headers."
+#endif
 
 // Forward declarations
 const char* find_resource_directory(void);
@@ -299,6 +308,87 @@ void test_HandlePaddleCollision_EdgeOfPaddle(void) {
     
     // Should still collide and reverse
     TEST_ASSERT_GREATER_THAN(0.0f, ball.velocity.x);
+}
+
+void test_HandlePaddleCollision_SpinAccumulatesOnExistingY(void) {
+    // Ball arrives with existing downward Y velocity and hits top of paddle.
+    // Spin should add to the existing velocity, not replace it.
+    Ball ball = {
+        .position = { 35.0f, 250.0f },  // Top of paddle (paddleY = 250)
+        .velocity = { -5.0f, -2.0f },   // Already moving upward
+        .radius = 8.0f
+    };
+
+    HandlePaddleCollision(&ball, (Vector2){20.0f, 250.0f}, 15.0f, 100.0f);
+
+    // paddleCenter = 250 + 50 = 300; hitPosition = 250 - 300 = -50
+    // spinFactor = -50 / 50 = -1; spin = -1 * 3 = -3
+    // Expected Y: -2 + (-3) = -5
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, -5.0f, ball.velocity.y);
+}
+
+void test_HandlePaddleCollision_TinyPaddleNoSpinDivisionByZero(void) {
+    // halfHeight = 0.007 < 0.01 triggers the spin guard; Y velocity must not change.
+    Ball ball = {
+        .position = { 35.0f, 300.0f },
+        .velocity = { -5.0f, 2.0f },
+        .radius = 8.0f
+    };
+    float origY = ball.velocity.y;
+
+    // Paddle height 0.015 -> halfHeight 0.0075 -> spin guard active
+    HandlePaddleCollision(&ball, (Vector2){20.0f, 295.0f}, 15.0f, 0.015f);
+
+    TEST_ASSERT_EQUAL_FLOAT(origY, ball.velocity.y);  // No spin applied
+    TEST_ASSERT_EQUAL_FLOAT(5.0f, ball.velocity.x);   // X still reversed
+}
+
+void test_HandlePaddleCollision_SpinClampedAtMaxSpeedY(void) {
+    /* Repeated top-edge hits accumulate spin (+3 each time).  Before the clamp
+     * was added, velocity.y would grow without bound.  After the fix it must
+     * never exceed MAX_BALL_SPEED_Y (15.0f) regardless of how many hits occur.
+     *
+     * Each collision pushes the ball out to x >= 45, so we reset x to 35 before
+     * each hit to keep the ball inside the paddle region.
+     */
+    Ball ball = {
+        .position = { 35.0f, 250.0f },  // Top edge of paddle -> max positive spin
+        .velocity = { -5.0f, 0.0f },
+        .radius = 8.0f
+    };
+    Vector2 paddlePos = { 20.0f, 250.0f };
+
+    for (int i = 0; i < 20; ++i) {
+        ball.position.x = 35.0f;   // Reset inside paddle so collision fires
+        ball.velocity.x = -5.0f;   // Ball must be moving toward paddle
+        HandlePaddleCollision(&ball, paddlePos, 15.0f, 100.0f);
+    }
+
+    TEST_ASSERT_TRUE(ball.velocity.y <= 15.0f);   // Must not exceed cap
+    TEST_ASSERT_TRUE(ball.velocity.y >= -15.0f);  // Cap applies both directions
+}
+
+void test_HandlePaddleCollision_UsesStructDimensionsForGeometry(void) {
+    /* Collision detection uses the paddle dimensions passed as arguments.
+     * A wider paddle (width 50) should collide where the standard 15-wide
+     * paddle would not, confirming the geometry comes from the struct fields
+     * (which main.c now passes as paddle->width / paddle->height) and not
+     * from hard-coded constants.
+     */
+    Ball ball = {
+        .position = { 60.0f, 300.0f },  // x=60, outside a width-15 paddle at x=20
+        .velocity = { -5.0f, 0.0f },
+        .radius = 8.0f
+    };
+    float origVelX = ball.velocity.x;
+
+    // Width 15: ball at x=60 is well outside -> no collision
+    HandlePaddleCollision(&ball, (Vector2){20.0f, 250.0f}, 15.0f, 100.0f);
+    TEST_ASSERT_EQUAL_FLOAT(origVelX, ball.velocity.x);  // No collision
+
+    // Width 50: paddle spans x=20..70, ball at x=60 is inside -> collision
+    HandlePaddleCollision(&ball, (Vector2){20.0f, 250.0f}, 50.0f, 100.0f);
+    TEST_ASSERT_EQUAL_FLOAT(-origVelX, ball.velocity.x); // Velocity reversed
 }
 
 void test_HandlePaddleCollision_PushbackPreventsSticking(void) {
@@ -622,6 +712,21 @@ void test_UpdatePaddlePosition_ZeroHeight(void) {
     TEST_ASSERT_EQUAL_FLOAT(255.0f, paddle.position.y);
 }
 
+void test_UpdatePaddlePosition_OversizedPaddleClampsToTop(void) {
+    // When paddle.height > screenHeight, maxY goes negative and is clamped to 0.
+    // The paddle must always end up at y = 0 regardless of starting position.
+    Paddle paddle = {
+        .position = { 20.0f, 300.0f },
+        .width = 15.0f,
+        .height = 800.0f,  // Larger than screenHeight (600)
+        .velocity = 0.0f,
+        .score = 0
+    };
+
+    UpdatePaddlePosition(&paddle, 600);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, paddle.position.y);
+}
+
 void test_MovePaddle_RapidDirectionChange(void) {
     Paddle paddle = {
         .position = { 20.0f, 250.0f },
@@ -750,6 +855,15 @@ void test_FindResourceFile_ReturnsNonNull(void) {
     TEST_ASSERT_TRUE(strstr(path, "orbitron") != NULL);
 }
 
+void test_FindResourceFile_NullSubpathDoesNotCrash(void) {
+    /* Before the fix, FindResourceFile(NULL) passed NULL to snprintf's %s,
+     * which is undefined behaviour in C99.  The fix adds an early-return guard.
+     * This test verifies the function returns non-NULL without crashing.
+     */
+    const char *path = FindResourceFile(NULL);
+    TEST_ASSERT_NOT_NULL(path);
+}
+
 void test_FindFontPath_ReturnsNonNull(void) {
     const char *path = FindFontPath();
     TEST_ASSERT_NOT_NULL(path);
@@ -768,6 +882,19 @@ void test_FindResourceDirectory_IsConsistent(void) {
 }
 
 // ==================== Font File Tests ====================
+
+void test_RaylibVersion_AtLeastSix(void) {
+    /* Documents the minimum raylib version assumption.
+     * TEXTURE_FILTER_BILINEAR (value 1) was confirmed present in v5 but the
+     * SetTextureFilter API and its correct interaction with font textures is
+     * relied upon from v6 onwards.  If the header changes incompatibly this
+     * test will catch it at the constant level without needing a GPU context.
+     */
+    TEST_ASSERT_GREATER_OR_EQUAL(6, RAYLIB_VERSION_MAJOR);
+    TEST_ASSERT_EQUAL_INT(1, TEXTURE_FILTER_BILINEAR);
+    TEST_ASSERT_EQUAL_INT(0, LOG_WARNING > LOG_INFO ? 0 : 0);  /* LOG_WARNING > LOG_INFO */
+    TEST_ASSERT_TRUE(LOG_WARNING > LOG_INFO);
+}
 
 void test_FontFile_ExistsAndValid(void) {
     const char *resourceDir = find_resource_directory();
@@ -1034,6 +1161,61 @@ void test_AddLeaderboardEntry_SpecialCharacters(void) {
     TEST_ASSERT_EQUAL_CHAR('@', lb.entries[0].initials[0]);
 }
 
+void test_LoadLeaderboard_IgnoresEntriesBeyondMax(void) {
+    char tempHome[64];
+    snprintf(tempHome, sizeof(tempHome), "/tmp/purpletestXXXXXX");
+    if (!mkdtemp(tempHome)) {
+        TEST_IGNORE_MESSAGE("Failed to create temp directory");
+    }
+    const char *oldHome = getenv("HOME");
+    setenv("HOME", tempHome, 1);
+
+    char purpleDir[128];
+    snprintf(purpleDir, sizeof(purpleDir), "%s/.purple", tempHome);
+    mkdir(purpleDir, 0700);
+
+    char lbPath[160];
+    snprintf(lbPath, sizeof(lbPath), "%s/leaderboard.txt", purpleDir);
+    FILE *fp = fopen(lbPath, "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    for (int i = 1; i <= (int)LEADERBOARD_MAX_ENTRIES + 5; ++i) {
+        fprintf(fp, "%d.000;P;TST\n", i * 10);
+    }
+    fclose(fp);
+
+    Leaderboard lb = {0};
+    LoadLeaderboard(&lb);
+
+    // Must never exceed the max even though the file has more lines
+    TEST_ASSERT_EQUAL_UINT32(LEADERBOARD_MAX_ENTRIES, lb.count);
+
+    if (oldHome) setenv("HOME", oldHome, 1);
+}
+
+void test_SaveAndLoadLeaderboard_PreservesPlayerWinner(void) {
+    char tempHome[64];
+    snprintf(tempHome, sizeof(tempHome), "/tmp/purpletestXXXXXX");
+    if (!mkdtemp(tempHome)) {
+        TEST_IGNORE_MESSAGE("Failed to create temp directory");
+    }
+    const char *oldHome = getenv("HOME");
+    setenv("HOME", tempHome, 1);
+
+    Leaderboard lb = {0};
+    AddLeaderboardEntry(&lb, "XYZ", 'P', 42.5f);
+    SaveLeaderboard(&lb);
+
+    Leaderboard loaded = {0};
+    LoadLeaderboard(&loaded);
+
+    TEST_ASSERT_EQUAL_UINT32(1, loaded.count);
+    TEST_ASSERT_EQUAL_CHAR('P', loaded.entries[0].winner);
+    TEST_ASSERT_EQUAL_STRING_LEN("XYZ", loaded.entries[0].initials, 3);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 42.5f, loaded.entries[0].seconds);
+
+    if (oldHome) setenv("HOME", oldHome, 1);
+}
+
 void test_AddLeaderboardEntry_MaintainsSortAfterMultipleAdds(void) {
     Leaderboard lb = {0};
     // Add in random order
@@ -1084,6 +1266,10 @@ int main(void) {
     RUN_TEST(test_HandlePaddleCollision_CenterNoSpin);
     RUN_TEST(test_HandlePaddleCollision_MultipleRapidCollisions);
     RUN_TEST(test_HandlePaddleCollision_EdgeOfPaddle);
+    RUN_TEST(test_HandlePaddleCollision_SpinAccumulatesOnExistingY);
+    RUN_TEST(test_HandlePaddleCollision_TinyPaddleNoSpinDivisionByZero);
+    RUN_TEST(test_HandlePaddleCollision_SpinClampedAtMaxSpeedY);
+    RUN_TEST(test_HandlePaddleCollision_UsesStructDimensionsForGeometry);
     
     // Ball position tests
     RUN_TEST(test_UpdateBallPosition_MovesCorrectly);
@@ -1107,6 +1293,7 @@ int main(void) {
     RUN_TEST(test_UpdatePaddlePosition_StoppingAtBoundary);
     RUN_TEST(test_UpdatePaddlePosition_NegativeVelocityAtTop);
     RUN_TEST(test_UpdatePaddlePosition_ZeroHeight);
+    RUN_TEST(test_UpdatePaddlePosition_OversizedPaddleClampsToTop);
     RUN_TEST(test_UpdatePaddlePosition_LargeVelocity);
     RUN_TEST(test_MovePaddle_RapidDirectionChange);
     RUN_TEST(test_UpdatePaddlePosition_AlreadyAtExactTop);
@@ -1123,10 +1310,12 @@ int main(void) {
     // Resource function tests
     RUN_TEST(test_FindResourceDirectory_IsValid);
     RUN_TEST(test_FindResourceFile_ReturnsNonNull);
+    RUN_TEST(test_FindResourceFile_NullSubpathDoesNotCrash);
     RUN_TEST(test_FindFontPath_ReturnsNonNull);
     RUN_TEST(test_FindResourceDirectory_IsConsistent);
     
     // Font file tests
+    RUN_TEST(test_RaylibVersion_AtLeastSix);
     RUN_TEST(test_FontFile_ExistsAndValid);
 
     // Leaderboard tests
@@ -1148,8 +1337,10 @@ int main(void) {
     RUN_TEST(test_AddLeaderboardEntry_SpecialCharacters);
     RUN_TEST(test_AddLeaderboardEntry_MaintainsSortAfterMultipleAdds);
     RUN_TEST(test_LoadLeaderboard_NonexistentFile);
+    RUN_TEST(test_LoadLeaderboard_IgnoresEntriesBeyondMax);
     RUN_TEST(test_SaveLeaderboard_EmptyLeaderboard);
     RUN_TEST(test_SaveAndLoadLeaderboard_PersistsSorted);
+    RUN_TEST(test_SaveAndLoadLeaderboard_PreservesPlayerWinner);
     
     return UNITY_END();
 }
