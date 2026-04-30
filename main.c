@@ -124,6 +124,11 @@ int main(void)
     char aiScoreText[20];
     snprintf(playerScoreText, sizeof(playerScoreText), "%d", player.score);
     snprintf(aiScoreText, sizeof(aiScoreText), "%d", ai.score);
+    // Cached text sizes; updated alongside the score strings
+    Vector2 playerScoreSize = MeasureTextEx(orbitronFont, playerScoreText,
+                                            (float)SCORE_DISPLAY_FONT_SIZE, 1);
+    Vector2 aiScoreSize = MeasureTextEx(orbitronFont, aiScoreText,
+                                        (float)SCORE_DISPLAY_FONT_SIZE, 1);
     
     // Set initial ball velocity using multiplier
     ResetBall(&ball, SCREEN_WIDTH, SCREEN_HEIGHT, ballSpeedMultiplier);
@@ -169,6 +174,12 @@ int main(void)
             // Handle top/bottom wall collisions
             if (IsCollidingVertical(&ball, SCREEN_HEIGHT)) {
                 ball.velocity.y *= -1.0f;
+                // Correct position to prevent re-collision on next frame
+                if (ball.position.y - ball.radius < 0.0f) {
+                    ball.position.y = ball.radius;
+                } else if (ball.position.y + ball.radius > (float)SCREEN_HEIGHT) {
+                    ball.position.y = (float)SCREEN_HEIGHT - ball.radius;
+                }
             }
 
             // Check for scoring (ball goes off left or right)
@@ -176,6 +187,8 @@ int main(void)
                 // AI scores
                 ai.score++;
                 snprintf(aiScoreText, sizeof(aiScoreText), "%d", ai.score);
+                aiScoreSize = MeasureTextEx(orbitronFont, aiScoreText,
+                                            (float)SCORE_DISPLAY_FONT_SIZE, 1);
                 ballSpeedMultiplier = CalculateSpeedMultiplier(ai.score + player.score);
                 if (ai.score >= POINTS_TO_WIN) {
                     lastGameSeconds = (float)(GetTime() - gameStartTime);
@@ -190,6 +203,8 @@ int main(void)
                 // Player scores
                 player.score++;
                 snprintf(playerScoreText, sizeof(playerScoreText), "%d", player.score);
+                playerScoreSize = MeasureTextEx(orbitronFont, playerScoreText,
+                                                (float)SCORE_DISPLAY_FONT_SIZE, 1);
                 ballSpeedMultiplier = CalculateSpeedMultiplier(ai.score + player.score);
                 if (player.score >= POINTS_TO_WIN) {
                     lastGameSeconds = (float)(GetTime() - gameStartTime);
@@ -283,16 +298,12 @@ int main(void)
             DrawCircleV(ball.position, ball.radius, WHITE);
 
             // Scores: large numbers centered in each half
-            Vector2 pSize = MeasureTextEx(orbitronFont, playerScoreText,
-                                          (float)SCORE_DISPLAY_FONT_SIZE, 1);
             DrawTextEx(orbitronFont, playerScoreText,
-                       (Vector2){SCREEN_WIDTH / 4.0f - pSize.x / 2.0f, 20.0f},
+                       (Vector2){SCREEN_WIDTH / 4.0f - playerScoreSize.x / 2.0f, 20.0f},
                        (float)SCORE_DISPLAY_FONT_SIZE, 1, (Color){80, 160, 255, 130});
 
-            Vector2 aSize = MeasureTextEx(orbitronFont, aiScoreText,
-                                          (float)SCORE_DISPLAY_FONT_SIZE, 1);
             DrawTextEx(orbitronFont, aiScoreText,
-                       (Vector2){3.0f * SCREEN_WIDTH / 4.0f - aSize.x / 2.0f, 20.0f},
+                       (Vector2){3.0f * SCREEN_WIDTH / 4.0f - aiScoreSize.x / 2.0f, 20.0f},
                        (float)SCORE_DISPLAY_FONT_SIZE, 1, (Color){255, 80, 80, 130});
         } else if (gameState == NAME_ENTRY) {
             DrawCenteredText(orbitronFont, "YOU WIN!", 180,

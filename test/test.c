@@ -1099,8 +1099,8 @@ void test_AddLeaderboardEntry_NegativeTime(void) {
     Leaderboard lb = {0};
     AddLeaderboardEntry(&lb, "ABC", 'P', -5.0f);
     
-    TEST_ASSERT_EQUAL_UINT32(1, lb.count);
-    TEST_ASSERT_EQUAL_FLOAT(-5.0f, lb.entries[0].seconds);
+    /* Negative times are invalid game results and must be rejected */
+    TEST_ASSERT_EQUAL_UINT32(0, lb.count);
 }
 
 void test_AddLeaderboardEntry_VeryLargeTime(void) {

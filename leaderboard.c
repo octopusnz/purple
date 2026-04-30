@@ -130,6 +130,7 @@ static void UppercaseInitials(char *dst3, const char *src)
 void AddLeaderboardEntry(Leaderboard *lb, const char *initials, char winner, float seconds)
 {
     if (!lb) return;
+    if (!isfinite(seconds) || seconds < 0.0f) return;
     LeaderboardEntry e;
     UppercaseInitials(e.initials, initials ? initials : "   ");
     e.winner = (winner == 'A') ? 'A' : 'P';
