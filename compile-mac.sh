@@ -4,7 +4,7 @@
 #    https://github.com/octopusnz/purple
 #    Copyright (c) 2026 Jacob Doherty
 #    SPDX-License-Identifier: MIT
-#    File: compile.sh
+#    File: compile-mac.sh
 #    Description: Bash build script to assist with compiling
 #=========================================================================
 
@@ -15,10 +15,22 @@ IFS=$' \t\n'
 
 # Enable alias expansion in non-interactive shell
 shopt -s expand_aliases
-alias gcc='/usr/local/bin/gcc-15.2.0'
-alias clang='/usr/local/bin/clang'
-alias clang-tidy='/usr/local/bin/clang-tidy'
-alias scan-build='/usr/local/bin/scan-build'
+alias gcc="$(command -v gcc-15 2>/dev/null || command -v gcc-14 2>/dev/null || command -v gcc 2>/dev/null || echo "gcc")"
+alias clang="$(command -v clang 2>/dev/null || echo "clang")"
+alias clang-tidy="$(command -v clang-tidy 2>/dev/null || echo "clang-tidy")"
+alias scan-build="$(command -v scan-build 2>/dev/null || echo "scan-build")"
+
+# Millisecond epoch timestamp: use gdate (GNU coreutils) if available, else python3
+epoch_ms() {
+    if command -v gdate &>/dev/null; then
+        gdate +%s%3N
+    else
+        python3 -c "import time; print(int(time.time() * 1000))"
+    fi
+}
+
+# Timeout command: prefer gtimeout (GNU coreutils) over BSD timeout
+TIMEOUT_CMD=$(command -v gtimeout 2>/dev/null || command -v timeout 2>/dev/null || echo "timeout")
 
 # Cleanup handler: kill background fuzz progress indicator on any exit or interrupt
 FUZZ_PROGRESS_PID=""
@@ -64,8 +76,8 @@ if [ $# -gt 0 ]; then
         echo "  No arguments: Production build with optimizations"
         echo "  --debug or debug: Debug build with ASAN, UBSan, and Valgrind checks"
         echo "  --test or test: Build and run unit tests"
-        echo "  --fuzz or fuzz: Build and run coverage-guided fuzz testing (60s per target, 5 min total)"
-        echo "  --fuzz-long or fuzz-long: Extended fuzz testing (12 min per target, 60 min total)"
+        echo "  --fuzz or fuzz: Build and run coverage-guided fuzz testing (60s per target, 7 min total)"
+        echo "  --fuzz-long or fuzz-long: Extended fuzz testing (12 min per target, 84 min total)"
         echo "  --clean or clean: Remove all binaries and object files"
         exit 1
     fi
@@ -162,7 +174,7 @@ fuzz_progress() {
 }
 
 # Set compilation flags based on mode
-BUILD_START_TIME=$(date +%s%3N)
+BUILD_START_TIME=$(epoch_ms)
 if [ "$DEBUG_MODE" = true ]; then
     # Debug build with sanitizers
     echo "Compiling with GCC..."
@@ -177,7 +189,9 @@ if [ "$DEBUG_MODE" = true ]; then
             -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion \
             -Wsign-conversion -Wdouble-promotion -Wformat=2 \
             -fno-omit-frame-pointer -fanalyzer -std=c99 -fsanitize=address \
-            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+            -lraylib -lm \
+            -framework CoreVideo -framework IOKit -framework Cocoa \
+            -framework GLUT -framework OpenGL 2>&1
         echo ""
         echo "--- Building main-ubsan ---"
         gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-ubsan \
@@ -185,14 +199,18 @@ if [ "$DEBUG_MODE" = true ]; then
             -Wsign-conversion -Wdouble-promotion -Wformat=2 \
             -fno-omit-frame-pointer -fanalyzer -std=c99 \
             -fsanitize=undefined -fno-sanitize-recover=undefined \
-            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+            -lraylib -lm \
+            -framework CoreVideo -framework IOKit -framework Cocoa \
+            -framework GLUT -framework OpenGL 2>&1
         echo ""
         echo "--- Building main-valgrind ---"
         gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-valgrind \
             -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion \
             -Wsign-conversion -Wdouble-promotion -Wformat=2 \
             -fno-omit-frame-pointer -fanalyzer -std=c99 \
-            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+            -lraylib -lm \
+            -framework CoreVideo -framework IOKit -framework Cocoa \
+            -framework GLUT -framework OpenGL 2>&1
         echo ""
         echo "Completed: $(date)"
     } > "$GCC_LOG" 2>&1
@@ -217,7 +235,9 @@ if [ "$DEBUG_MODE" = true ]; then
         clang main.c ball.c paddle.c resource.c leaderboard.c -o build/main-clang \
             -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion \
             -Wsign-conversion -Wdouble-promotion -Wformat=2 -std=c99 \
-            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+            -lraylib -lm \
+            -framework CoreVideo -framework IOKit -framework Cocoa \
+            -framework GLUT -framework OpenGL 2>&1
         echo ""
         echo "Completed: $(date)"
     } > "$CLANG_LOG" 2>&1
@@ -236,16 +256,20 @@ elif [ "$TEST_MODE" = true ]; then
     gcc ball.c paddle.c resource.c leaderboard.c \
         /usr/local/include/unity/unity.c test/test.c \
         -o build/test_runner -Wall -Wextra -Wpedantic -std=c99 -I. \
-        -lraylib -lm -lpthread -ldl -lrt -lX11
+        -lraylib -lm \
+        -framework CoreVideo -framework IOKit -framework Cocoa \
+        -framework GLUT -framework OpenGL
 elif [ "$FUZZ_MODE" = false ] && [ "$DEBUG_MODE" = false ] && [ "$TEST_MODE" = false ]; then
     # Production build with size optimizations
     gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main \
         -Wall -Wextra -Wpedantic -std=c99 -Os -s -flto \
         -ffunction-sections -fdata-sections -fomit-frame-pointer \
         -fno-asynchronous-unwind-tables -fno-unwind-tables \
-        -Wl,--gc-sections -Wl,--as-needed -Wl,-O1 \
-        -lraylib -lm -lpthread -ldl -lrt -lX11
-    strip --strip-all build/main
+        -Wl,-dead_strip \
+        -lraylib -lm \
+        -framework CoreVideo -framework IOKit -framework Cocoa \
+        -framework GLUT -framework OpenGL
+    strip -x build/main
     echo "Production build complete"
 fi
 
@@ -310,7 +334,9 @@ if [ "$DEBUG_MODE" = true ]; then
         echo ""
         scan-build -o build/scan-build-results gcc main.c ball.c paddle.c \
             resource.c leaderboard.c -o /dev/null -std=c99 \
-            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1 || true
+            -lraylib -lm \
+            -framework CoreVideo -framework IOKit -framework Cocoa \
+            -framework GLUT -framework OpenGL 2>&1 || true
         echo ""
         echo "Completed: $(date)"
     } > "$SCANBUILD_LOG"
@@ -332,7 +358,7 @@ if [ "$DEBUG_MODE" = true ]; then
         echo "Sanitizer: AddressSanitizer (ASAN)"
         echo "Started: $(date)"
         echo ""
-        timeout 5 ./build/main-asan 2>&1 || true
+        $TIMEOUT_CMD 5 ./build/main-asan 2>&1 || true
         echo ""
         echo "=== Analysis Complete ==="
     } > "$ASAN_LOG" 2>&1
@@ -362,7 +388,7 @@ if [ "$DEBUG_MODE" = true ]; then
         echo "Sanitizer: UndefinedBehaviorSanitizer (UBSan)"
         echo "Started: $(date)"
         echo ""
-        timeout 5 ./build/main-ubsan 2>&1 || true
+        $TIMEOUT_CMD 5 ./build/main-ubsan 2>&1 || true
         echo ""
         echo "=== Analysis Complete ==="
     } > "$UBSAN_LOG" 2>&1
@@ -391,7 +417,7 @@ if [ "$DEBUG_MODE" = true ]; then
         echo "Valgrind Version: $(valgrind --version)"
         echo "Started: $(date)"
         echo ""
-        timeout 5 valgrind --leak-check=full -s --suppressions=valgrind.supp ./build/main-valgrind 2>&1 || true
+        $TIMEOUT_CMD 5 valgrind --leak-check=full -s --suppressions=valgrind.supp ./build/main-valgrind 2>&1 || true
         echo ""
         echo "=== Analysis Complete ==="
     } > "$VALGRIND_LOG" 2>&1
@@ -413,7 +439,7 @@ if [ "$DEBUG_MODE" = true ]; then
             rm "$file"
         done
     fi
-    TOTAL_END_TIME=$(date +%s%3N)
+    TOTAL_END_TIME=$(epoch_ms)
     TOTAL_ELAPSED_MS=$((TOTAL_END_TIME - BUILD_START_TIME))
     TOTAL_ELAPSED=$(format_elapsed_time "$TOTAL_ELAPSED_MS")
     echo ""
@@ -432,7 +458,7 @@ elif [ "$TEST_MODE" = true ]; then
         echo "Tests failed with exit code $TEST_EXIT_CODE"
         exit $TEST_EXIT_CODE
     fi
-    TOTAL_END_TIME=$(date +%s%3N)
+    TOTAL_END_TIME=$(epoch_ms)
     TOTAL_ELAPSED_MS=$((TOTAL_END_TIME - BUILD_START_TIME))
     TOTAL_ELAPSED=$(format_elapsed_time "$TOTAL_ELAPSED_MS")
     echo ""
@@ -517,7 +543,7 @@ elif [ "$FUZZ_MODE" = true ]; then
         echo "Corpus count: $INITIAL_CORPUS_COUNT"
         echo ""
         echo "--- Running ball collision fuzzer ($FUZZ_DESC) ---"
-        timeout $FUZZ_TIMEOUT ./build/fuzz_ball_collision \
+        $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_ball_collision \
             -max_len=44 \
             -artifact_prefix=build/fuzz_artifacts/ball_ \
             -use_value_profile=1 \
@@ -525,7 +551,7 @@ elif [ "$FUZZ_MODE" = true ]; then
             fuzz/corpus/ 2>&1 || true
         echo ""
         echo "--- Running paddle position fuzzer ($FUZZ_DESC) ---"
-        timeout $FUZZ_TIMEOUT ./build/fuzz_paddle_position \
+        $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_paddle_position \
             -max_len=32 \
             -artifact_prefix=build/fuzz_artifacts/paddle_ \
             -use_value_profile=1 \
@@ -533,7 +559,7 @@ elif [ "$FUZZ_MODE" = true ]; then
             fuzz/corpus/ 2>&1 || true
         echo ""
         echo "--- Running leaderboard fuzzer ($FUZZ_DESC) ---"
-        timeout $FUZZ_TIMEOUT ./build/fuzz_leaderboard \
+        $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_leaderboard \
             -max_len=80 \
             -artifact_prefix=build/fuzz_artifacts/leaderboard_ \
             -use_value_profile=1 \
@@ -541,7 +567,7 @@ elif [ "$FUZZ_MODE" = true ]; then
             fuzz/corpus/ 2>&1 || true
         echo ""
         echo "--- Running AI paddle fuzzer ($FUZZ_DESC) ---"
-        timeout $FUZZ_TIMEOUT ./build/fuzz_ai_paddle \
+        $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_ai_paddle \
             -max_len=32 \
             -artifact_prefix=build/fuzz_artifacts/ai_ \
             -use_value_profile=1 \
@@ -549,7 +575,7 @@ elif [ "$FUZZ_MODE" = true ]; then
             fuzz/corpus/ 2>&1 || true
         echo ""
         echo "--- Running game physics fuzzer ($FUZZ_DESC) ---"
-        timeout $FUZZ_TIMEOUT ./build/fuzz_game_physics \
+        $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_game_physics \
             -max_len=60 \
             -artifact_prefix=build/fuzz_artifacts/physics_ \
             -use_value_profile=1 \
@@ -557,7 +583,7 @@ elif [ "$FUZZ_MODE" = true ]; then
             fuzz/corpus/ 2>&1 || true
         echo ""
         echo "--- Running leaderboard load fuzzer ($FUZZ_DESC) ---"
-        timeout $FUZZ_TIMEOUT ./build/fuzz_leaderboard_load \
+        $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_leaderboard_load \
             -max_len=2048 \
             -artifact_prefix=build/fuzz_artifacts/lb_load_ \
             -use_value_profile=1 \
@@ -565,7 +591,7 @@ elif [ "$FUZZ_MODE" = true ]; then
             fuzz/corpus/ 2>&1 || true
         echo ""
         echo "--- Running resource path fuzzer ($FUZZ_DESC) ---"
-        timeout $FUZZ_TIMEOUT ./build/fuzz_resource_path \
+        $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_resource_path \
             -max_len=512 \
             -artifact_prefix=build/fuzz_artifacts/resource_ \
             -use_value_profile=1 \
@@ -665,7 +691,7 @@ elif [ "$FUZZ_MODE" = true ]; then
         } >> "$FUZZ_LOG"
     fi
     
-    TOTAL_END_TIME=$(date +%s%3N)
+    TOTAL_END_TIME=$(epoch_ms)
     TOTAL_ELAPSED_MS=$((TOTAL_END_TIME - BUILD_START_TIME))
     TOTAL_ELAPSED=$(format_elapsed_time "$TOTAL_ELAPSED_MS")
     echo ""
@@ -673,7 +699,7 @@ elif [ "$FUZZ_MODE" = true ]; then
 
 elif [ "$DEBUG_MODE" = false ] && [ "$TEST_MODE" = false ] && [ "$FUZZ_MODE" = false ] && [ "$FUZZ_LONG_MODE" = false ]; then
     # Production mode total time
-    TOTAL_END_TIME=$(date +%s%3N)
+    TOTAL_END_TIME=$(epoch_ms)
     TOTAL_ELAPSED_MS=$((TOTAL_END_TIME - BUILD_START_TIME))
     TOTAL_ELAPSED=$(format_elapsed_time "$TOTAL_ELAPSED_MS")
     echo ""
