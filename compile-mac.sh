@@ -32,6 +32,10 @@ epoch_ms() {
 # Timeout command: prefer gtimeout (GNU coreutils) over BSD timeout
 TIMEOUT_CMD=$(command -v gtimeout 2>/dev/null || command -v timeout 2>/dev/null || echo "timeout")
 
+# Ensure Homebrew include/lib paths are searched (required on Apple Silicon)
+export CPATH="/opt/homebrew/include${CPATH:+:$CPATH}"
+export LIBRARY_PATH="/opt/homebrew/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+
 # Cleanup handler: kill background fuzz progress indicator on any exit or interrupt
 FUZZ_PROGRESS_PID=""
 cleanup() {
@@ -254,8 +258,9 @@ elif [ "$TEST_MODE" = true ]; then
     # Test build
     echo "Compiling tests..."
     gcc ball.c paddle.c resource.c leaderboard.c \
-        /usr/local/include/unity/unity.c test/test.c \
+        /opt/homebrew/include/unity/unity.c test/test.c \
         -o build/test_runner -Wall -Wextra -Wpedantic -std=c99 -I. \
+        -D_POSIX_C_SOURCE=200809L -D_DARWIN_C_SOURCE \
         -lraylib -lm \
         -framework CoreVideo -framework IOKit -framework Cocoa \
         -framework GLUT -framework OpenGL
@@ -468,9 +473,12 @@ elif [ "$FUZZ_MODE" = true ]; then
     echo ""
     echo "Compiling fuzz targets..."
     
-    # Ensure clang is available for libFuzzer
-    if ! command -v clang &> /dev/null; then
-        echo "Error: clang is required for fuzzing. Please install clang."
+    # Fuzzing requires LLVM clang with libFuzzer (Apple's clang does not ship libFuzzer).
+    # Use Homebrew LLVM explicitly; Apple's system clang will not work.
+    FUZZ_CLANG="/opt/homebrew/opt/llvm/bin/clang"
+    if [ ! -x "$FUZZ_CLANG" ]; then
+        echo "Error: Homebrew LLVM clang is required for fuzzing (Apple's clang lacks libFuzzer)."
+        echo "Install with: brew install llvm"
         exit 1
     fi
     
@@ -493,47 +501,47 @@ elif [ "$FUZZ_MODE" = true ]; then
 
     {
         echo "=== Fuzzing Campaign ==="
-        echo "Clang Version: $(clang --version | head -1)"
+        echo "Clang Version: $($FUZZ_CLANG --version | head -1)"
         echo "Started: $(date)"
         echo ""
         echo "--- Building fuzz_ball_collision target ---"
-        clang ball.c fuzz/fuzz_ball_collision.c -o build/fuzz_ball_collision \
+        $FUZZ_CLANG ball.c fuzz/fuzz_ball_collision.c -o build/fuzz_ball_collision \
             -fsanitize=fuzzer,address,undefined \
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 2>&1
         echo ""
         echo "--- Building fuzz_paddle_position target ---"
-        clang paddle.c fuzz/fuzz_paddle_position.c -o build/fuzz_paddle_position \
+        $FUZZ_CLANG paddle.c fuzz/fuzz_paddle_position.c -o build/fuzz_paddle_position \
             -fsanitize=fuzzer,address,undefined \
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 2>&1
         echo ""
         echo "--- Building fuzz_leaderboard target ---"
-        clang leaderboard.c fuzz/fuzz_leaderboard.c -o build/fuzz_leaderboard \
+        $FUZZ_CLANG leaderboard.c fuzz/fuzz_leaderboard.c -o build/fuzz_leaderboard \
             -fsanitize=fuzzer,address,undefined \
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 2>&1
         echo ""
         echo "--- Building fuzz_ai_paddle target ---"
-        clang paddle.c fuzz/fuzz_ai_paddle.c -o build/fuzz_ai_paddle \
+        $FUZZ_CLANG paddle.c fuzz/fuzz_ai_paddle.c -o build/fuzz_ai_paddle \
             -fsanitize=fuzzer,address,undefined \
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 2>&1
         echo ""
         echo "--- Building fuzz_game_physics target ---"
-        clang ball.c paddle.c fuzz/fuzz_game_physics.c -o build/fuzz_game_physics \
+        $FUZZ_CLANG ball.c paddle.c fuzz/fuzz_game_physics.c -o build/fuzz_game_physics \
             -fsanitize=fuzzer,address,undefined \
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 2>&1
         echo ""
         echo "--- Building fuzz_leaderboard_load target ---"
-        clang leaderboard.c fuzz/fuzz_leaderboard_load.c -o build/fuzz_leaderboard_load \
+        $FUZZ_CLANG leaderboard.c fuzz/fuzz_leaderboard_load.c -o build/fuzz_leaderboard_load \
             -fsanitize=fuzzer,address,undefined \
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
         echo ""
         echo "--- Building fuzz_resource_path target ---"
-        clang resource.c fuzz/fuzz_resource_path.c -o build/fuzz_resource_path \
+        $FUZZ_CLANG resource.c fuzz/fuzz_resource_path.c -o build/fuzz_resource_path \
             -fsanitize=fuzzer,address,undefined \
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 2>&1
