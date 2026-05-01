@@ -15,10 +15,16 @@ IFS=$' \t\n'
 
 # Enable alias expansion in non-interactive shell
 shopt -s expand_aliases
-alias gcc="$(command -v gcc-15 2>/dev/null || command -v gcc-14 2>/dev/null || command -v gcc 2>/dev/null || echo "gcc")"
+alias gcc="$(command -v gcc-15 2>/dev/null || command -v gcc-14 2>/dev/null || command -v gcc-13 2>/dev/null || command -v gcc 2>/dev/null || echo "gcc")"
 alias clang="$(command -v clang 2>/dev/null || echo "clang")"
 alias clang-tidy="$(command -v clang-tidy 2>/dev/null || echo "clang-tidy")"
 alias scan-build="$(command -v scan-build 2>/dev/null || echo "scan-build")"
+
+# Warn if 'gcc' resolved to Apple clang (macOS ships /usr/bin/gcc as a clang alias)
+if gcc --version 2>&1 | grep -q "Apple clang"; then
+    echo "Warning: 'gcc' resolves to Apple clang, not GNU GCC."
+    echo "Install Homebrew GCC to get real GCC: brew install gcc"
+fi
 
 # Millisecond epoch timestamp: use gdate (GNU coreutils) if available, else python3
 epoch_ms() {
