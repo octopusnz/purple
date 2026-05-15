@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 #include "../leaderboard.h"
 
 /* Fuzz target: test leaderboard operations with random entries
@@ -30,8 +31,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         initials[2] = (char)data[offset + 2];
         initials[3] = '\0';
         
-        /* Extract winner type (1 byte) */
-        char winner = (data[offset + 3] % 2 == 0) ? 'P' : 'A';
+        /* Extract winner type (1 byte) — use raw byte to exercise the
+         * 'A'/'P' normalization in AddLeaderboardEntry for all 256 values.
+         */
+        char winner = (char)data[offset + 3];
         
         /* Extract time (4 bytes as float) */
         float seconds;
@@ -43,10 +46,20 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         
         /* Add entry to leaderboard */
         AddLeaderboardEntry(&lb, initials, winner, seconds);
-        
+
         offset += 8;
     }
-    
+
+    /* Verify that NaN / Inf / negative seconds are silently rejected */
+    size_t pre_count = lb.count;
+    AddLeaderboardEntry(&lb, "NAN", 'P', NAN);
+    AddLeaderboardEntry(&lb, "INF", 'P', INFINITY);
+    AddLeaderboardEntry(&lb, "NEG", 'P', -1.0f);
+    if (lb.count > pre_count) {
+        /* These invalid entries must never increase count */
+        __builtin_trap();
+    }
+
     /* Verify leaderboard invariants */
     if (lb.count > LEADERBOARD_MAX_ENTRIES) {
         /* Leaderboard exceeded max entries */

@@ -45,7 +45,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     ai.velocity = 0.0f;
     ai.score = 0;
 
+    /* Parse screenHeight from bytes 56–59 (within the existing 60-byte minimum).
+     * Clamped to a sane range so paddle/ball edge cases at different heights are
+     * explored without triggering degenerate geometry.
+     */
     int screenHeight = 600;
+    memcpy(&screenHeight, data + 56, sizeof(int));
+    if (screenHeight < 100) screenHeight = 100;
+    if (screenHeight > 2000) screenHeight = 2000;
 
     /* Clamp values to reasonable ranges to avoid NaN/Inf propagation */
     /* Ball properties */

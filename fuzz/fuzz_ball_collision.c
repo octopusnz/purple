@@ -72,5 +72,43 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     /* Test collision again after update to ensure consistency */
     HandlePaddleCollision(&ball, paddlePos, paddleWidth, paddleHeight);
 
+    /* Spin accumulation invariant: repeated collisions must not push velocity.y
+     * beyond the MAX_BALL_SPEED_Y cap (15.0f) defined in ball.c.
+     *
+     * A fresh ball is used with NaN-safe, clamped paddle geometry so the test
+     * is independent of any NaN state that may have arrived via the fuzz input.
+     * The ball is repositioned inside the paddle before each call to guarantee
+     * a collision actually fires and the spin logic runs every iteration.
+     */
+    {
+        Vector2 spinPos;
+        float   spinW, spinH;
+
+        /* Use fuzz-derived paddle values; fall back to defaults for NaN inputs */
+        spinPos.x = (paddlePos.x == paddlePos.x) ? paddlePos.x : 20.0f;
+        spinPos.y = (paddlePos.y == paddlePos.y) ? paddlePos.y : 200.0f;
+        spinW     = (paddleWidth  == paddleWidth)  ? paddleWidth  : 15.0f;
+        spinH     = (paddleHeight == paddleHeight) ? paddleHeight : 100.0f;
+
+        Ball spinBall;
+        spinBall.velocity.x = 4.0f;
+        spinBall.velocity.y = 0.0f;
+        spinBall.radius     = ball.radius;  /* already clamped above */
+
+        for (int bounce = 0; bounce < 20; ++bounce) {
+            /* Place ball at paddle centre to guarantee collision */
+            spinBall.position.x = spinPos.x + spinW / 2.0f;
+            spinBall.position.y = spinPos.y + spinH / 2.0f;
+
+            HandlePaddleCollision(&spinBall, spinPos, spinW, spinH);
+
+            float vy = spinBall.velocity.y;
+            /* Use negative-form so NaN (which fails all comparisons) also traps */
+            if (!(vy >= -15.0f && vy <= 15.0f)) {
+                __builtin_trap();
+            }
+        }
+    }
+
     return 0;
 }

@@ -49,7 +49,7 @@ if [ $# -gt 0 ]; then
     elif [ "$1" = "--fuzz-long" ] || [ "$1" = "fuzz-long" ]; then
         FUZZ_MODE=true
         FUZZ_LONG_MODE=true
-        echo "Building coverage-guided FUZZ TESTING binaries (extended 60-minute run)..."
+        echo "Building coverage-guided FUZZ TESTING binaries (extended 96-minute run)..."
     elif [ "$1" = "--clean" ] || [ "$1" = "clean" ]; then
         echo "Cleaning binaries and object files..."
         if [ -d build ]; then
@@ -64,8 +64,8 @@ if [ $# -gt 0 ]; then
         echo "  No arguments: Production build with optimizations"
         echo "  --debug or debug: Debug build with ASAN, UBSan, and Valgrind checks"
         echo "  --test or test: Build and run unit tests"
-        echo "  --fuzz or fuzz: Build and run coverage-guided fuzz testing (60s per target, 5 min total)"
-        echo "  --fuzz-long or fuzz-long: Extended fuzz testing (12 min per target, 60 min total)"
+        echo "  --fuzz or fuzz: Build and run coverage-guided fuzz testing (60s per target, 8 min total)"
+        echo "  --fuzz-long or fuzz-long: Extended fuzz testing (12 min per target, 96 min total)"
         echo "  --clean or clean: Remove all binaries and object files"
         exit 1
     fi
@@ -462,7 +462,7 @@ elif [ "$FUZZ_MODE" = true ]; then
     fi
 
     # Start the live progress indicator (writes to /dev/tty, not the log)
-    fuzz_progress "$FUZZ_LOG" 7 "$FUZZ_TIMEOUT" &
+    fuzz_progress "$FUZZ_LOG" 8 "$FUZZ_TIMEOUT" &
     FUZZ_PROGRESS_PID=$!
 
     {
@@ -502,6 +502,12 @@ elif [ "$FUZZ_MODE" = true ]; then
         echo ""
         echo "--- Building fuzz_leaderboard_load target ---"
         clang leaderboard.c fuzz/fuzz_leaderboard_load.c -o build/fuzz_leaderboard_load \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
+        echo ""
+        echo "--- Building fuzz_leaderboard_save target ---"
+        clang leaderboard.c fuzz/fuzz_leaderboard_save.c -o build/fuzz_leaderboard_save \
             -fsanitize=fuzzer,address,undefined \
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
@@ -560,6 +566,14 @@ elif [ "$FUZZ_MODE" = true ]; then
         timeout $FUZZ_TIMEOUT ./build/fuzz_leaderboard_load \
             -max_len=2048 \
             -artifact_prefix=build/fuzz_artifacts/lb_load_ \
+            -use_value_profile=1 \
+            -timeout=5 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running leaderboard save fuzzer ($FUZZ_DESC) ---"
+        timeout $FUZZ_TIMEOUT ./build/fuzz_leaderboard_save \
+            -max_len=80 \
+            -artifact_prefix=build/fuzz_artifacts/lb_save_ \
             -use_value_profile=1 \
             -timeout=5 \
             fuzz/corpus/ 2>&1 || true
