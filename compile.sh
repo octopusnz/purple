@@ -462,7 +462,7 @@ elif [ "$FUZZ_MODE" = true ]; then
     fi
 
     # Start the live progress indicator (writes to /dev/tty, not the log)
-    fuzz_progress "$FUZZ_LOG" 8 "$FUZZ_TIMEOUT" &
+    fuzz_progress "$FUZZ_LOG" 9 "$FUZZ_TIMEOUT" &
     FUZZ_PROGRESS_PID=$!
 
     {
@@ -518,6 +518,12 @@ elif [ "$FUZZ_MODE" = true ]; then
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 2>&1
         echo ""
+        echo "--- Building fuzz_speed_scaling target ---"
+        clang ball.c fuzz/fuzz_speed_scaling.c -o build/fuzz_speed_scaling \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
+        echo ""
         # Count initial corpus files
         INITIAL_CORPUS_COUNT=$(find fuzz/corpus -type f 2>/dev/null | wc -l)
         echo "Corpus count: $INITIAL_CORPUS_COUNT"
@@ -556,7 +562,7 @@ elif [ "$FUZZ_MODE" = true ]; then
         echo ""
         echo "--- Running game physics fuzzer ($FUZZ_DESC) ---"
         timeout $FUZZ_TIMEOUT ./build/fuzz_game_physics \
-            -max_len=60 \
+            -max_len=65 \
             -artifact_prefix=build/fuzz_artifacts/physics_ \
             -use_value_profile=1 \
             -timeout=2 \
@@ -582,6 +588,14 @@ elif [ "$FUZZ_MODE" = true ]; then
         timeout $FUZZ_TIMEOUT ./build/fuzz_resource_path \
             -max_len=512 \
             -artifact_prefix=build/fuzz_artifacts/resource_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running speed scaling fuzzer ($FUZZ_DESC) ---"
+        timeout $FUZZ_TIMEOUT ./build/fuzz_speed_scaling \
+            -max_len=14 \
+            -artifact_prefix=build/fuzz_artifacts/speed_ \
             -use_value_profile=1 \
             -timeout=2 \
             fuzz/corpus/ 2>&1 || true

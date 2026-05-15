@@ -81,6 +81,36 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             __builtin_trap();
         }
     }
-    
+
+    /* Equal-time stability: fill a fresh leaderboard with LEADERBOARD_MAX_ENTRIES
+     * entries that all share the same time, then add one more.  The sort must
+     * still satisfy the ascending-order invariant and must not exceed the cap.
+     *
+     * Uses a fuzz-derived time so libFuzzer can explore different float values
+     * including subnormals near zero.
+     */
+    {
+        Leaderboard eqlb = {0};
+        float eqTime;
+        if (size >= 4) {
+            memcpy(&eqTime, data, sizeof(float));
+            if (!isfinite(eqTime) || eqTime < 0.0f) eqTime = 42.0f;
+        } else {
+            eqTime = 42.0f;
+        }
+
+        for (int e = 0; e < LEADERBOARD_MAX_ENTRIES + 2; ++e) {
+            AddLeaderboardEntry(&eqlb, "EQL", 'P', eqTime);
+        }
+
+        if (eqlb.count > LEADERBOARD_MAX_ENTRIES) __builtin_trap();
+
+        for (size_t i = 1; i < eqlb.count; ++i) {
+            if (eqlb.entries[i].seconds < eqlb.entries[i-1].seconds) {
+                __builtin_trap();
+            }
+        }
+    }
+
     return 0;
 }

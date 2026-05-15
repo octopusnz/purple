@@ -44,13 +44,17 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         memcpy(&paddleHeight, data + 32, sizeof(float));
     }
 
-    /* Clamp paddle dimensions to reasonable ranges to avoid extreme values */
-    if (paddleWidth < 0.1f) paddleWidth = 0.1f;
-    if (paddleWidth > 100.0f) paddleWidth = 100.0f;
-    if (paddleHeight < 0.1f) paddleHeight = 0.1f;
-    if (paddleHeight > 500.0f) paddleHeight = 500.0f;
-    if (ball.radius < 0.1f) ball.radius = 0.1f;
-    if (ball.radius > 50.0f) ball.radius = 50.0f;
+    /* Clamp paddle dimensions to reasonable ranges.
+     * Use negated-form comparisons (!(x >= lo)) so that NaN — which makes
+     * every ordered comparison return false — is caught and replaced.
+     * The classic form (x < lo) evaluates to false for NaN, letting it through.
+     */
+    if (!(paddleWidth  >= 0.1f))   paddleWidth  = 0.1f;
+    if (!(paddleWidth  <= 100.0f)) paddleWidth  = 100.0f;
+    if (!(paddleHeight >= 0.1f))   paddleHeight = 0.1f;
+    if (!(paddleHeight <= 500.0f)) paddleHeight = 500.0f;
+    if (!(ball.radius  >= 0.1f))   ball.radius  = 0.1f;
+    if (!(ball.radius  <= 50.0f))  ball.radius  = 50.0f;
 
     /* Test collision handling with random inputs
      * These functions should never crash regardless of input
@@ -108,6 +112,66 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                 __builtin_trap();
             }
         }
+    }
+
+    /* Corner collision tests: place ball touching each corner of the paddle
+     * (distance from ball centre to corner == radius).  The collision handler
+     * must not crash or produce NaN/Inf velocities regardless of which corner
+     * is hit.
+     *
+     * NaN-safe paddle geometry reused from the spin test above.
+     */
+    {
+        float cx = (paddlePos.x == paddlePos.x) ? paddlePos.x : 20.0f;
+        float cy = (paddlePos.y == paddlePos.y) ? paddlePos.y : 200.0f;
+        float cw = (paddleWidth  == paddleWidth)  ? paddleWidth  : 15.0f;
+        float ch = (paddleHeight == paddleHeight) ? paddleHeight : 100.0f;
+        float r  = ball.radius; /* already clamped */
+
+        /* Diagonal offset so the ball centre is exactly one radius away from
+         * each corner along the 45-degree line, placing it just inside the
+         * collision threshold.
+         */
+        const float diag = r * 0.70710678f; /* r / sqrt(2) */
+
+        typedef struct { float bx; float by; float vx; } CornerCase;
+        CornerCase corners[4] = {
+            { cx       - diag,  cy       - diag,  4.0f  }, /* top-left  */
+            { cx + cw  + diag,  cy       - diag, -4.0f  }, /* top-right */
+            { cx       - diag,  cy + ch  + diag,  4.0f  }, /* bot-left  */
+            { cx + cw  + diag,  cy + ch  + diag, -4.0f  }, /* bot-right */
+        };
+
+        for (int c = 0; c < 4; ++c) {
+            Ball cb;
+            cb.position.x = corners[c].bx;
+            cb.position.y = corners[c].by;
+            cb.velocity.x = corners[c].vx;
+            cb.velocity.y = 0.0f;
+            cb.radius     = r;
+
+            HandlePaddleCollision(&cb, (Vector2){cx, cy}, cw, ch);
+
+            /* Post-collision velocities must be finite */
+            if (cb.velocity.x != cb.velocity.x) __builtin_trap(); /* NaN vx */
+            if (cb.velocity.y != cb.velocity.y) __builtin_trap(); /* NaN vy */
+            if (cb.position.x != cb.position.x) __builtin_trap(); /* NaN px */
+            if (cb.position.y != cb.position.y) __builtin_trap(); /* NaN py */
+        }
+    }
+
+    /* Zero-velocity ball: CollisionHandler must not crash or divide by zero
+     * when the ball is stationary (degenerate input).
+     */
+    {
+        Ball zb;
+        zb.position.x = paddlePos.x + paddleWidth / 2.0f;
+        zb.position.y = paddlePos.y + paddleHeight / 2.0f;
+        zb.velocity.x = 0.0f;
+        zb.velocity.y = 0.0f;
+        zb.radius     = ball.radius;
+        HandlePaddleCollision(&zb, paddlePos, paddleWidth, paddleHeight);
+        /* Just must not crash; velocity.x will flip sign (0 → 0, fine) */
     }
 
     return 0;

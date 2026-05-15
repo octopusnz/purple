@@ -10,8 +10,14 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 #include "../ball.h"
 #include "../paddle.h"
+
+/* Mirror of main.c constants (cannot include main.c — Raylib dependency) */
+#define FUZZ_BALL_INITIAL_SPEED_X   6.0f
+#define FUZZ_BALL_INITIAL_SPEED_Y   3.0f
+#define FUZZ_SPEED_INCREMENT        0.12f
 
 /* Fuzz target: test realistic game scenarios with ball and paddle interactions
  * Tests combined physics simulation over multiple frames
@@ -163,6 +169,55 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             ball.velocity.y != ball.velocity.y) {
             /* Invalid floating point values detected */
             __builtin_trap();
+        }
+    }
+
+    /* --- Score-based speed scaling simulation ---
+     * Mirrors the main-loop path: score point → CalculateSpeedMultiplier →
+     * ResetBall with new velocity → continue physics.  This path was
+     * previously untested because the loop above uses a fixed speed.
+     *
+     * byte[60]: encodes totalScore in [0, 9] (game-realistic range).
+     * bytes[61..64]: optional float for a second score tier.
+     */
+    if (size >= 61) {
+        int totalScore = (int)(data[60] % 10);
+        float speedMul = 1.0f + (float)totalScore * FUZZ_SPEED_INCREMENT;
+
+        /* Multiplier must be finite and in expected range for 0-9 points */
+        if (!isfinite(speedMul))           __builtin_trap();
+        if (!(speedMul >= 1.0f && speedMul <= 2.1f)) __builtin_trap();
+
+        /* Fresh ball at screen centre with speed-scaled velocity */
+        Ball sb;
+        sb.radius     = 8.0f;
+        sb.position.x = 600.0f;
+        sb.position.y = (float)screenHeight / 2.0f;
+        sb.velocity.x = FUZZ_BALL_INITIAL_SPEED_X * speedMul *
+                        (ball.velocity.x >= 0.0f ? 1.0f : -1.0f);
+        sb.velocity.y = FUZZ_BALL_INITIAL_SPEED_Y * speedMul *
+                        (ball.velocity.y >= 0.0f ? 1.0f : -1.0f);
+
+        if (!isfinite(sb.velocity.x)) __builtin_trap();
+        if (!isfinite(sb.velocity.y)) __builtin_trap();
+
+        /* Run 30 frames; HandlePaddleCollision's spin cap keeps vy bounded,
+         * vx only flips sign → both must stay finite with no external clamp.
+         */
+        for (int f = 0; f < 30; ++f) {
+            UpdateBallPosition(&sb);
+
+            if (IsCollidingVertical(&sb, screenHeight)) {
+                sb.velocity.y *= -1.0f;
+            }
+
+            HandlePaddleCollision(&sb, player.position, player.width,  player.height);
+            HandlePaddleCollision(&sb, ai.position,     ai.width,      ai.height);
+
+            if (!isfinite(sb.velocity.x)) __builtin_trap();
+            if (!isfinite(sb.velocity.y)) __builtin_trap();
+            if (!isfinite(sb.position.x)) __builtin_trap();
+            if (!isfinite(sb.position.y)) __builtin_trap();
         }
     }
 
