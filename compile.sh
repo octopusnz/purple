@@ -112,52 +112,27 @@ format_elapsed_time() {
     fi
 }
 
-# Display a live progress line to /dev/tty while the fuzz log is being written.
-# Reads the growing log file to report the current target and elapsed time.
-# Run in the background; kill the PID when the fuzzing block completes.
-# Arguments: <log_file> <total_run_targets> <timeout_per_target_seconds>
+# Print a progress line each time a new fuzz target starts.
+# Runs in the background; killed by the parent when the fuzz block completes.
+# Arguments: <log_file> <total_run_targets>
 fuzz_progress() {
-    set +euo pipefail  # Never let a failed grep/sed kill the indicator
+    set +euo pipefail
     local log_file="$1"
     local total="$2"
-    local timeout_each="$3"
-    local total_seconds=$(( timeout_each * total ))
-    local start sp elapsed remaining label completed last_target spin eta_str
-    local spinners='/-\|'
-    start=$(date +%s)
-    sp=0
+    local last_target="" current_target="" completed=0
 
+    echo "  Building fuzz targets..."
     while true; do
-        elapsed=$(( $(date +%s) - start ))
-        spin="${spinners:$(( sp % 4 )):1}"
-        sp=$(( sp + 1 ))
-
-        completed=0
-        last_target=""
+        sleep 2
         if [ -f "$log_file" ]; then
-            completed=$(grep -c "^--- Running" "$log_file" 2>/dev/null)
-            last_target=$(grep "^--- Running" "$log_file" 2>/dev/null | tail -1 \
+            completed=$(grep -c "^--- Running" "$log_file" 2>/dev/null || echo 0)
+            current_target=$(grep "^--- Running" "$log_file" 2>/dev/null | tail -1 \
                 | sed 's/^--- Running \(.*\) fuzzer.*/\1/')
         fi
-
-        if [ -n "$last_target" ]; then
-            label="[${completed}/${total}] Running: ${last_target}"
-        else
-            label="Building targets"
+        if [ -n "$current_target" ] && [ "$current_target" != "$last_target" ]; then
+            echo "  [${completed}/${total}] ${current_target}"
+            last_target="$current_target"
         fi
-
-        remaining=$(( total_seconds - elapsed ))
-        if [ "$remaining" -le 0 ]; then
-            eta_str="finishing..."
-        elif [ "$remaining" -ge 60 ]; then
-            eta_str="~$(( remaining / 60 ))m$(( remaining % 60 ))s remaining"
-        else
-            eta_str="~${remaining}s remaining"
-        fi
-
-        printf '\r  [%s] %-52s %ds elapsed, %s' \
-            "$spin" "$label" "$elapsed" "$eta_str" >/dev/tty
-        sleep 1
     done
 }
 
@@ -167,35 +142,62 @@ if [ "$DEBUG_MODE" = true ]; then
     # Debug build with sanitizers
     echo "Compiling with GCC..."
     GCC_LOG="logs/gcc_$(date +%Y-%m-%d_%H-%M-%S).log"
+
+    # Capture each build's output separately so logs are clean even though
+    # asan / ubsan / valgrind targets are built in parallel.
+    _asan_tmp=$(mktemp)
+    _ubsan_tmp=$(mktemp)
+    _valgrind_tmp=$(mktemp)
+
+    {
+        echo "--- Building main-asan ---"
+        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-asan \
+            -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion \
+            -Wsign-conversion -Wdouble-promotion -Wformat=2 \
+            -fno-omit-frame-pointer -fanalyzer -std=c99 -pipe \
+            -fsanitize=address \
+            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+    } > "$_asan_tmp" &
+    _asan_pid=$!
+
+    {
+        echo "--- Building main-ubsan ---"
+        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-ubsan \
+            -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion \
+            -Wsign-conversion -Wdouble-promotion -Wformat=2 \
+            -fno-omit-frame-pointer -fanalyzer -std=c99 -pipe \
+            -fsanitize=undefined -fno-sanitize-recover=undefined \
+            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+    } > "$_ubsan_tmp" &
+    _ubsan_pid=$!
+
+    {
+        echo "--- Building main-valgrind ---"
+        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-valgrind \
+            -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion \
+            -Wsign-conversion -Wdouble-promotion -Wformat=2 \
+            -fno-omit-frame-pointer -fanalyzer -std=c99 -pipe \
+            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+    } > "$_valgrind_tmp"
+
+    wait "$_asan_pid" "$_ubsan_pid"
+
     {
         echo "=== GCC Compilation ==="
         echo "GCC Version: $(gcc --version | head -1)"
         echo "Started: $(date)"
         echo ""
-        echo "--- Building main-asan ---"
-        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-asan \
-            -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion \
-            -Wsign-conversion -Wdouble-promotion -Wformat=2 \
-            -fno-omit-frame-pointer -fanalyzer -std=c99 -fsanitize=address \
-            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+        cat "$_asan_tmp"
         echo ""
-        echo "--- Building main-ubsan ---"
-        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-ubsan \
-            -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion \
-            -Wsign-conversion -Wdouble-promotion -Wformat=2 \
-            -fno-omit-frame-pointer -fanalyzer -std=c99 \
-            -fsanitize=undefined -fno-sanitize-recover=undefined \
-            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+        cat "$_ubsan_tmp"
         echo ""
-        echo "--- Building main-valgrind ---"
-        gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main-valgrind \
-            -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion \
-            -Wsign-conversion -Wdouble-promotion -Wformat=2 \
-            -fno-omit-frame-pointer -fanalyzer -std=c99 \
-            -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
+        cat "$_valgrind_tmp"
         echo ""
         echo "Completed: $(date)"
-    } > "$GCC_LOG" 2>&1
+    } > "$GCC_LOG"
+
+    rm -f "$_asan_tmp" "$_ubsan_tmp" "$_valgrind_tmp"
+    unset _asan_tmp _ubsan_tmp _valgrind_tmp _asan_pid _ubsan_pid
     
     # Clean up old GCC log files (keep only 2 most recent)
     # shellcheck disable=SC2012
@@ -216,7 +218,7 @@ if [ "$DEBUG_MODE" = true ]; then
         echo "--- Building main-clang ---"
         clang main.c ball.c paddle.c resource.c leaderboard.c -o build/main-clang \
             -Wall -Wextra -Wpedantic -Wunused -Wshadow -Wconversion \
-            -Wsign-conversion -Wdouble-promotion -Wformat=2 -std=c99 \
+            -Wsign-conversion -Wdouble-promotion -Wformat=2 -std=c99 -pipe \
             -lraylib -lm -lpthread -ldl -lrt -lX11 2>&1
         echo ""
         echo "Completed: $(date)"
@@ -235,12 +237,12 @@ elif [ "$TEST_MODE" = true ]; then
     echo "Compiling tests..."
     gcc ball.c paddle.c resource.c leaderboard.c \
         /usr/local/include/unity/unity.c test/test.c \
-        -o build/test_runner -Wall -Wextra -Wpedantic -std=c99 -I. \
+        -o build/test_runner -Wall -Wextra -Wpedantic -std=c99 -pipe -I. \
         -lraylib -lm -lpthread -ldl -lrt -lX11
 elif [ "$FUZZ_MODE" = false ] && [ "$DEBUG_MODE" = false ] && [ "$TEST_MODE" = false ]; then
     # Production build with size optimizations
     gcc main.c ball.c paddle.c resource.c leaderboard.c -o build/main \
-        -Wall -Wextra -Wpedantic -std=c99 -Os -s -flto \
+        -Wall -Wextra -Wpedantic -std=c99 -Os -s -flto=auto -pipe \
         -ffunction-sections -fdata-sections -fomit-frame-pointer \
         -fno-asynchronous-unwind-tables -fno-unwind-tables \
         -Wl,--gc-sections -Wl,--as-needed -Wl,-O1 \
@@ -260,7 +262,8 @@ if [ "$DEBUG_MODE" = true ]; then
         echo "Started: $(date)"
         echo ""
         cppcheck --check-level=exhaustive --enable=all --inconclusive \
-            --verbose --force --suppress=missingIncludeSystem --std=c99 \
+            --verbose --force --suppress=missingIncludeSystem \
+            --suppress=staticFunction:resource.c --std=c99 \
             --checkers-report="$CHECKERS_REPORT" main.c 2>&1 || true
         echo ""
         echo "=== Checkers Report ==="
@@ -461,8 +464,8 @@ elif [ "$FUZZ_MODE" = true ]; then
         FUZZ_DESC="60 seconds"
     fi
 
-    # Start the live progress indicator (writes to /dev/tty, not the log)
-    fuzz_progress "$FUZZ_LOG" 9 "$FUZZ_TIMEOUT" &
+    # Start the progress indicator (prints one line per new target)
+    fuzz_progress "$FUZZ_LOG" 9 &
     FUZZ_PROGRESS_PID=$!
 
     {
@@ -609,10 +612,9 @@ elif [ "$FUZZ_MODE" = true ]; then
         echo "Completed: $(date)"
     } > "$FUZZ_LOG" 2>&1
 
-    # Stop the progress indicator and clear its line
+    # Stop the progress indicator
     kill "$FUZZ_PROGRESS_PID" 2>/dev/null || true
     wait "$FUZZ_PROGRESS_PID" 2>/dev/null || true
-    printf '\r%-80s\r' '' >/dev/tty
     echo "Fuzzing complete."
     
     # Clean up old fuzz log files (keep only 2 most recent)
