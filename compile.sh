@@ -465,7 +465,7 @@ elif [ "$FUZZ_MODE" = true ]; then
     fi
 
     # Start the progress indicator (prints one line per new target)
-    fuzz_progress "$FUZZ_LOG" 9 &
+    fuzz_progress "$FUZZ_LOG" 12 &
     FUZZ_PROGRESS_PID=$!
 
     {
@@ -526,6 +526,24 @@ elif [ "$FUZZ_MODE" = true ]; then
             -fsanitize=fuzzer,address,undefined \
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
+        echo ""
+        echo "--- Building fuzz_initials_roundtrip target ---"
+        clang leaderboard.c fuzz/fuzz_initials_roundtrip.c -o build/fuzz_initials_roundtrip \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
+        echo ""
+        echo "--- Building fuzz_ball_wall_sequence target ---"
+        clang ball.c fuzz/fuzz_ball_wall_sequence.c -o build/fuzz_ball_wall_sequence \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
+        echo ""
+        echo "--- Building fuzz_paddle_sequence target ---"
+        clang paddle.c fuzz/fuzz_paddle_sequence.c -o build/fuzz_paddle_sequence \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 2>&1
         echo ""
         # Count initial corpus files
         INITIAL_CORPUS_COUNT=$(find fuzz/corpus -type f 2>/dev/null | wc -l)
@@ -599,6 +617,30 @@ elif [ "$FUZZ_MODE" = true ]; then
         timeout $FUZZ_TIMEOUT ./build/fuzz_speed_scaling \
             -max_len=14 \
             -artifact_prefix=build/fuzz_artifacts/speed_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running initials roundtrip fuzzer ($FUZZ_DESC) ---"
+        timeout $FUZZ_TIMEOUT ./build/fuzz_initials_roundtrip \
+            -max_len=96 \
+            -artifact_prefix=build/fuzz_artifacts/initials_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running ball wall sequence fuzzer ($FUZZ_DESC) ---"
+        timeout $FUZZ_TIMEOUT ./build/fuzz_ball_wall_sequence \
+            -max_len=22 \
+            -artifact_prefix=build/fuzz_artifacts/wall_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running paddle sequence fuzzer ($FUZZ_DESC) ---"
+        timeout $FUZZ_TIMEOUT ./build/fuzz_paddle_sequence \
+            -max_len=512 \
+            -artifact_prefix=build/fuzz_artifacts/pseq_ \
             -use_value_profile=1 \
             -timeout=2 \
             fuzz/corpus/ 2>&1 || true

@@ -119,5 +119,32 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         }
     }
 
+    /* ----- HOME-empty fallback path -----
+     * GetLeaderboardDir falls back to "." when HOME is empty or unset.
+     * Exercise that branch by temporarily overriding HOME to an empty string,
+     * loading a leaderboard (which will look for "./leaderboard.txt"), then
+     * restoring HOME so subsequent iterations use the proper temp directory.
+     *
+     * The load will typically find no file (or an unrelated file in cwd),
+     * so lb2.count will be 0 — what matters is that the code path executes
+     * without crashing or producing invalid state.
+     */
+    {
+        setenv("HOME", "", 1);
+        Leaderboard lb2 = {0};
+        LoadLeaderboard(&lb2);
+        /* Invariants must hold even for the fallback path */
+        if (lb2.count > LEADERBOARD_MAX_ENTRIES) __builtin_trap();
+        for (size_t i = 0; i < lb2.count; ++i) {
+            if (lb2.entries[i].initials[3] != '\0') __builtin_trap();
+            if (!isfinite(lb2.entries[i].seconds) || lb2.entries[i].seconds < 0.0f)
+                __builtin_trap();
+            if (lb2.entries[i].winner != 'P' && lb2.entries[i].winner != 'A')
+                __builtin_trap();
+        }
+        /* Restore HOME for subsequent fuzz iterations */
+        setenv("HOME", s_home_dir, 1);
+    }
+
     return 0;
 }

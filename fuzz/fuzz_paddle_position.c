@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 #include "../paddle.h"
 
 /* Fuzz target: test paddle movement with random inputs
@@ -39,15 +40,36 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (paddle.height < 0.1f) paddle.height = 0.1f;
     if (paddle.height > 500.0f) paddle.height = 500.0f;
 
+    /* Guard against NaN velocity: NaN propagates into position.y making every
+     * ordered comparison (< / >) silently return false, which lets NaN escape
+     * the clamping logic undetected.  Clamp here to match the game's invariant
+     * that velocity is always set to a finite constant (PADDLE_SPEED / 0.0).
+     */
+    if (!(paddle.velocity >= -100.0f && paddle.velocity <= 100.0f))
+        paddle.velocity = 0.0f;
+
+    /* Guard against NaN/Inf initial position: NaN + finite_velocity = NaN,
+     * which silently bypasses every clamping comparison in UpdatePaddlePosition.
+     * NaN position is not a valid game state (position is always initialised to
+     * a known finite value before gameplay begins).  Any finite value is fine
+     * here because UpdatePaddlePosition clamps to [0, screenHeight-height].
+     */
+    if (!(paddle.position.y > -1e6f && paddle.position.y < 1e6f))
+        paddle.position.y = 0.0f;
+
     /* Test update with various inputs
      * Should handle boundary clamping correctly
      */
     UpdatePaddlePosition(&paddle, screenHeight);
 
-    /* Verify paddle stayed within bounds
-     * Note: If paddle.height > screenHeight, paddle will be clamped to y=0
-     * and will extend beyond screen bottom, which is acceptable behavior
+    /* Verify paddle stayed within bounds.
+     * Use isfinite() instead of bare ordered comparisons: NaN comparisons
+     * always return false, silently passing any NaN value through the checks.
      */
+    if (!isfinite(paddle.position.y)) {
+        /* Position must be finite after update */
+        __builtin_trap();
+    }
     if (paddle.position.y < 0.0f) {
         /* Paddle should never have negative position */
         __builtin_trap();
@@ -69,12 +91,15 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     /* Test paddle movements */
     MovePaddleUp(&paddle);
     UpdatePaddlePosition(&paddle, screenHeight);
+    if (!isfinite(paddle.position.y)) __builtin_trap();
 
     MovePaddleDown(&paddle);
     UpdatePaddlePosition(&paddle, screenHeight);
+    if (!isfinite(paddle.position.y)) __builtin_trap();
 
     StopPaddle(&paddle);
     UpdatePaddlePosition(&paddle, screenHeight);
+    if (!isfinite(paddle.position.y)) __builtin_trap();
 
     return 0;
 }

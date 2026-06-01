@@ -8,6 +8,7 @@
 ========================================================================= */
 
 #include "paddle.h"
+#include <math.h>
 #include <stddef.h>
 
 #define PADDLE_SPEED 6.0f
@@ -19,6 +20,12 @@ void UpdatePaddlePosition(Paddle *paddle, int screenHeight)
     if (paddle == NULL) return;
 
     paddle->position.y += paddle->velocity;
+
+    // Guard against NaN/Inf: ordered comparisons with NaN always return false,
+    // silently bypassing every clamp below.  Reset to safe top-of-screen.
+    if (!isfinite(paddle->position.y)) {
+        paddle->position.y = 0.0f;
+    }
 
     // Keep paddle within screen bounds
     if (paddle->position.y < 0.0f) {

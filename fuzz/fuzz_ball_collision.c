@@ -68,7 +68,38 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         if (screenHeight < 100) screenHeight = 100;
         if (screenHeight > 2000) screenHeight = 2000;
     }
-    IsCollidingVertical(&ball, screenHeight);
+
+    /* Correctness invariant for IsCollidingVertical: the function must return
+     * the exact same truth value as the mathematical condition it encodes.
+     * Test with a sanitized copy of the ball so NaN position/radius (which are
+     * still raw from the fuzz bytes at this point) do not interfere — NaN
+     * comparisons return false, so both sides would agree anyway, but an
+     * explicit clean copy makes the intent clear and lets libFuzzer measure
+     * the branch coverage of the boundary conditions independently.
+     */
+    {
+        Ball cleanBall;
+        /* Use fuzz-derived values but with already-clamped radius */
+        cleanBall.radius     = ball.radius;  /* clamped above to [0.1, 50] */
+        cleanBall.position.x = 600.0f;
+        /* Clamp position.y to a finite range so the expected computation is
+         * well-defined; use the raw fuzz position.y if finite, else default. */
+        cleanBall.position.y = (ball.position.y == ball.position.y &&
+                                ball.position.y > -1e6f &&
+                                ball.position.y < 1e6f)
+                               ? ball.position.y : (float)screenHeight / 2.0f;
+        cleanBall.velocity.x = 0.0f;
+        cleanBall.velocity.y = 0.0f;
+
+        int gotCollision = IsCollidingVertical(&cleanBall, screenHeight);
+        int wantCollision =
+            (cleanBall.position.y + cleanBall.radius >= (float)screenHeight) ||
+            (cleanBall.position.y - cleanBall.radius <= 0.0f);
+        if (gotCollision != wantCollision) {
+            /* IsCollidingVertical returned wrong answer */
+            __builtin_trap();
+        }
+    }
 
     /* Update position (should handle any velocity) */
     UpdateBallPosition(&ball);

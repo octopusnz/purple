@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 #include "../paddle.h"
 
 /* Fuzz target: test AI paddle logic with random ball positions and paddle states
@@ -53,6 +54,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (ai.height < 0.1f) ai.height = 0.1f;
     if (ai.height > 500.0f) ai.height = 500.0f;
 
+    /* Guard against NaN/Inf initial position: NaN + finite_velocity = NaN,
+     * which silently bypasses every clamping comparison in UpdatePaddlePosition.
+     * Matches the same guard used in fuzz_game_physics.c.  Any finite value is
+     * acceptable because UpdateAIPaddle immediately clamps via UpdatePaddlePosition.
+     */
+    if (!(ai.position.y > -1e6f && ai.position.y < 1e6f))
+        ai.position.y = 0.0f;
+
     /* Test AI paddle update multiple times to catch state-dependent bugs */
     for (int i = 0; i < 5; ++i) {
         float prevY = ai.position.y;
@@ -62,6 +71,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         /* Verify paddle stayed within bounds
          * Note: Oversized paddles (height > screenHeight) will be at y=0
          */
+        /* isfinite() catches NaN that silently passes ordered comparisons */
+        if (!isfinite(ai.position.y)) {
+            /* Position must be finite after UpdateAIPaddle */
+            __builtin_trap();
+        }
         if (ai.position.y < 0.0f) {
             /* Paddle should never have negative position */
             __builtin_trap();
