@@ -15,7 +15,7 @@ IFS=$' \t\n'
 
 # Enable alias expansion in non-interactive shell
 shopt -s expand_aliases
-alias gcc='/usr/local/bin/gcc-15.2.0'
+alias gcc='/usr/local/bin/gcc'
 alias clang='/usr/local/bin/clang'
 alias clang-tidy='/usr/local/bin/clang-tidy'
 alias scan-build='/usr/local/bin/scan-build'
@@ -465,7 +465,7 @@ elif [ "$FUZZ_MODE" = true ]; then
     fi
 
     # Start the progress indicator (prints one line per new target)
-    fuzz_progress "$FUZZ_LOG" 12 &
+    fuzz_progress "$FUZZ_LOG" 14 &
     FUZZ_PROGRESS_PID=$!
 
     {
@@ -544,6 +544,18 @@ elif [ "$FUZZ_MODE" = true ]; then
             -fsanitize=fuzzer,address,undefined \
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 2>&1
+        echo ""
+        echo "--- Building fuzz_ball_spin_sequence target ---"
+        clang ball.c fuzz/fuzz_ball_spin_sequence.c -o build/fuzz_ball_spin_sequence \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
+        echo ""
+        echo "--- Building fuzz_ball_update target ---"
+        clang ball.c fuzz/fuzz_ball_update.c -o build/fuzz_ball_update \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
         echo ""
         # Count initial corpus files
         INITIAL_CORPUS_COUNT=$(find fuzz/corpus -type f 2>/dev/null | wc -l)
@@ -641,6 +653,22 @@ elif [ "$FUZZ_MODE" = true ]; then
         timeout $FUZZ_TIMEOUT ./build/fuzz_paddle_sequence \
             -max_len=512 \
             -artifact_prefix=build/fuzz_artifacts/pseq_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running ball spin sequence fuzzer ($FUZZ_DESC) ---"
+        timeout $FUZZ_TIMEOUT ./build/fuzz_ball_spin_sequence \
+            -max_len=41 \
+            -artifact_prefix=build/fuzz_artifacts/spin_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running ball update fuzzer ($FUZZ_DESC) ---"
+        timeout $FUZZ_TIMEOUT ./build/fuzz_ball_update \
+            -max_len=24 \
+            -artifact_prefix=build/fuzz_artifacts/ball_update_ \
             -use_value_profile=1 \
             -timeout=2 \
             fuzz/corpus/ 2>&1 || true

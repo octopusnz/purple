@@ -8,6 +8,7 @@
 ========================================================================= */
 
 #include "ball.h"
+#include <math.h>
 #include <stddef.h>
 
 #define SPIN_EFFECT_MULTIPLIER 3.0f
@@ -20,9 +21,23 @@
 
 void UpdateBallPosition(Ball* ball) {
     if (ball == NULL) return;
-    
+
+    // Guard against NaN/Inf velocity: NaN propagates into position and then
+    // silently bypasses every downstream range check (ordered comparisons with
+    // NaN always return false).  Matches the same guard in UpdatePaddlePosition.
+    if (!isfinite(ball->velocity.x)) ball->velocity.x = 0.0f;
+    if (!isfinite(ball->velocity.y)) ball->velocity.y = 0.0f;
+
     ball->position.x += ball->velocity.x;
     ball->position.y += ball->velocity.y;
+
+    // Guard against Inf position: two large-but-finite floats can add to Inf
+    // when their sum exceeds MAX_FLOAT (e.g. velocity ~3.1e38 + position ~4.3e37
+    // overflows float32).  Reset to origin so downstream collision logic sees a
+    // finite value.  In normal gameplay positions are bounded to screen dimensions
+    // (~1200×600) so this path is unreachable through legitimate game states.
+    if (!isfinite(ball->position.x)) ball->position.x = 0.0f;
+    if (!isfinite(ball->position.y)) ball->position.y = 0.0f;
 }
 
 int IsCollidingVertical(const Ball* ball, int screenHeight) {
@@ -91,6 +106,9 @@ void HandlePaddleCollision(Ball* ball, Vector2 paddlePosition,
         float hitPosition = ball->position.y - (paddlePosition.y + halfHeight);
         float spinFactor = hitPosition / halfHeight;  // Range: -1 to 1
         ball->velocity.y += spinFactor * SPIN_EFFECT_MULTIPLIER;
+        // Guard against NaN (e.g. from NaN initial velocity.y): ordered clamp
+        // comparisons silently return false for NaN, letting it escape.
+        if (!isfinite(ball->velocity.y)) ball->velocity.y = 0.0f;
         // Clamp to prevent unbounded growth from repeated spin accumulation
         if (ball->velocity.y > MAX_BALL_SPEED_Y) ball->velocity.y = MAX_BALL_SPEED_Y;
         else if (ball->velocity.y < -MAX_BALL_SPEED_Y) ball->velocity.y = -MAX_BALL_SPEED_Y;
