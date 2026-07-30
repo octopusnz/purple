@@ -2,5 +2,6 @@ build/
 fuzz/corpus/
 logs/
 .vscode/
-.github/
+.github/*
+!.github/workflows/
 .editorconfig
