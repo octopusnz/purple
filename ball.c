@@ -14,8 +14,10 @@
 #define SPIN_EFFECT_MULTIPLIER 3.0f
 #define COLLISION_PUSHBACK 2.0f
 /* Cap vertical speed to prevent the ball going nearly vertical after many
- * spin-accumulating bounces.  Chosen as 3× the maximum initial Y speed
- * (BALL_INITIAL_SPEED_Y 2.0 × max multiplier ~1.2 × 3 ≈ 7.2, rounded up).
+ * spin-accumulating bounces.  Max initial Y speed is BALL_INITIAL_SPEED_Y
+ * (3.0 in main.c) times the top-of-range speed multiplier (~1.96 at
+ * SPEED_INCREMENT_PER_POINT 0.12), i.e. ~5.9.  15.0 leaves room for spin to
+ * build up across several bounces without letting Y speed run away.
  */
 #define MAX_BALL_SPEED_Y 15.0f
 

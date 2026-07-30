@@ -71,7 +71,7 @@ if [ $# -gt 0 ]; then
     elif [ "$1" = "--fuzz-long" ] || [ "$1" = "fuzz-long" ]; then
         FUZZ_MODE=true
         FUZZ_LONG_MODE=true
-        echo "Building coverage-guided FUZZ TESTING binaries (extended 60-minute run)..."
+        echo "Building coverage-guided FUZZ TESTING binaries (extended 168-minute run)..."
     elif [ "$1" = "--clean" ] || [ "$1" = "clean" ]; then
         echo "Cleaning binaries and object files..."
         if [ -d build ]; then
@@ -86,8 +86,8 @@ if [ $# -gt 0 ]; then
         echo "  No arguments: Production build with optimizations"
         echo "  --debug or debug: Debug build with ASAN, UBSan, and Valgrind checks"
         echo "  --test or test: Build and run unit tests"
-        echo "  --fuzz or fuzz: Build and run coverage-guided fuzz testing (60s per target, 7 min total)"
-        echo "  --fuzz-long or fuzz-long: Extended fuzz testing (12 min per target, 84 min total)"
+        echo "  --fuzz or fuzz: Build and run coverage-guided fuzz testing (60s per target, 14 min total)"
+        echo "  --fuzz-long or fuzz-long: Extended fuzz testing (12 min per target, 168 min total)"
         echo "  --clean or clean: Remove all binaries and object files"
         exit 1
     fi
@@ -295,8 +295,10 @@ if [ "$DEBUG_MODE" = true ]; then
         echo "Started: $(date)"
         echo ""
         cppcheck --check-level=exhaustive --enable=all --inconclusive \
-            --verbose --force --suppress=missingIncludeSystem --std=c99 \
-            --checkers-report="$CHECKERS_REPORT" main.c 2>&1 || true
+            --verbose --force --suppress=missingIncludeSystem \
+            --suppress=staticFunction:resource.c --std=c99 \
+            --checkers-report="$CHECKERS_REPORT" \
+            main.c ball.c paddle.c leaderboard.c resource.c 2>&1 || true
         echo ""
         echo "=== Checkers Report ==="
         cat "$CHECKERS_REPORT"
@@ -502,7 +504,7 @@ elif [ "$FUZZ_MODE" = true ]; then
     fi
 
     # Start the live progress indicator (writes to /dev/tty, not the log)
-    fuzz_progress "$FUZZ_LOG" 7 "$FUZZ_TIMEOUT" &
+    fuzz_progress "$FUZZ_LOG" 14 "$FUZZ_TIMEOUT" &
     FUZZ_PROGRESS_PID=$!
 
     {
@@ -546,11 +548,53 @@ elif [ "$FUZZ_MODE" = true ]; then
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
         echo ""
+        echo "--- Building fuzz_leaderboard_save target ---"
+        $FUZZ_CLANG leaderboard.c fuzz/fuzz_leaderboard_save.c -o build/fuzz_leaderboard_save \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
+        echo ""
         echo "--- Building fuzz_resource_path target ---"
         $FUZZ_CLANG resource.c fuzz/fuzz_resource_path.c -o build/fuzz_resource_path \
             -fsanitize=fuzzer,address,undefined \
             -fsanitize-coverage=inline-8bit-counters,indirect-calls \
             -std=c99 -Wall -Wextra -g -O1 2>&1
+        echo ""
+        echo "--- Building fuzz_speed_scaling target ---"
+        $FUZZ_CLANG ball.c fuzz/fuzz_speed_scaling.c -o build/fuzz_speed_scaling \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
+        echo ""
+        echo "--- Building fuzz_initials_roundtrip target ---"
+        $FUZZ_CLANG leaderboard.c fuzz/fuzz_initials_roundtrip.c -o build/fuzz_initials_roundtrip \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
+        echo ""
+        echo "--- Building fuzz_ball_wall_sequence target ---"
+        $FUZZ_CLANG ball.c fuzz/fuzz_ball_wall_sequence.c -o build/fuzz_ball_wall_sequence \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
+        echo ""
+        echo "--- Building fuzz_paddle_sequence target ---"
+        $FUZZ_CLANG paddle.c fuzz/fuzz_paddle_sequence.c -o build/fuzz_paddle_sequence \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 2>&1
+        echo ""
+        echo "--- Building fuzz_ball_spin_sequence target ---"
+        $FUZZ_CLANG ball.c fuzz/fuzz_ball_spin_sequence.c -o build/fuzz_ball_spin_sequence \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
+        echo ""
+        echo "--- Building fuzz_ball_update target ---"
+        $FUZZ_CLANG ball.c fuzz/fuzz_ball_update.c -o build/fuzz_ball_update \
+            -fsanitize=fuzzer,address,undefined \
+            -fsanitize-coverage=inline-8bit-counters,indirect-calls \
+            -std=c99 -Wall -Wextra -g -O1 -lm 2>&1
         echo ""
         # Count initial corpus files
         INITIAL_CORPUS_COUNT=$(find fuzz/corpus -type f 2>/dev/null | wc -l)
@@ -604,10 +648,66 @@ elif [ "$FUZZ_MODE" = true ]; then
             -timeout=5 \
             fuzz/corpus/ 2>&1 || true
         echo ""
+        echo "--- Running leaderboard save fuzzer ($FUZZ_DESC) ---"
+        $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_leaderboard_save \
+            -max_len=80 \
+            -artifact_prefix=build/fuzz_artifacts/lb_save_ \
+            -use_value_profile=1 \
+            -timeout=5 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
         echo "--- Running resource path fuzzer ($FUZZ_DESC) ---"
         $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_resource_path \
             -max_len=512 \
             -artifact_prefix=build/fuzz_artifacts/resource_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running speed scaling fuzzer ($FUZZ_DESC) ---"
+        $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_speed_scaling \
+            -max_len=14 \
+            -artifact_prefix=build/fuzz_artifacts/speed_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running initials roundtrip fuzzer ($FUZZ_DESC) ---"
+        $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_initials_roundtrip \
+            -max_len=96 \
+            -artifact_prefix=build/fuzz_artifacts/initials_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running ball wall sequence fuzzer ($FUZZ_DESC) ---"
+        $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_ball_wall_sequence \
+            -max_len=22 \
+            -artifact_prefix=build/fuzz_artifacts/wall_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running paddle sequence fuzzer ($FUZZ_DESC) ---"
+        $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_paddle_sequence \
+            -max_len=512 \
+            -artifact_prefix=build/fuzz_artifacts/pseq_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running ball spin sequence fuzzer ($FUZZ_DESC) ---"
+        $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_ball_spin_sequence \
+            -max_len=41 \
+            -artifact_prefix=build/fuzz_artifacts/spin_ \
+            -use_value_profile=1 \
+            -timeout=2 \
+            fuzz/corpus/ 2>&1 || true
+        echo ""
+        echo "--- Running ball update fuzzer ($FUZZ_DESC) ---"
+        $TIMEOUT_CMD $FUZZ_TIMEOUT ./build/fuzz_ball_update \
+            -max_len=24 \
+            -artifact_prefix=build/fuzz_artifacts/ball_update_ \
             -use_value_profile=1 \
             -timeout=2 \
             fuzz/corpus/ 2>&1 || true

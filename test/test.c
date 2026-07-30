@@ -15,6 +15,7 @@
 #include "../paddle.h"
 #include "../leaderboard.h"
 #include "../resource.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -156,9 +157,47 @@ void test_UpdateBallPosition_WithZeroVelocity(void) {
     };
     
     UpdateBallPosition(&ball);
-    
+
     TEST_ASSERT_EQUAL_FLOAT(100.0f, ball.position.x);
     TEST_ASSERT_EQUAL_FLOAT(100.0f, ball.position.y);
+}
+
+void test_UpdateBallPosition_NaNVelocityResetsToZero(void) {
+    // NaN velocity must not propagate into position: ordered comparisons
+    // with NaN always return false, so downstream range checks would
+    // silently miss it. UpdateBallPosition resets NaN velocity to 0 first.
+    Ball ball = {
+        .position = { 100.0f, 100.0f },
+        .velocity = { NAN, NAN },
+        .radius = 10.0f
+    };
+
+    UpdateBallPosition(&ball);
+
+    TEST_ASSERT_FLOAT_IS_NOT_NAN(ball.velocity.x);
+    TEST_ASSERT_FLOAT_IS_NOT_NAN(ball.velocity.y);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, ball.velocity.x);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, ball.velocity.y);
+    TEST_ASSERT_EQUAL_FLOAT(100.0f, ball.position.x);
+    TEST_ASSERT_EQUAL_FLOAT(100.0f, ball.position.y);
+}
+
+void test_UpdateBallPosition_InfPositionResetsToZero(void) {
+    // 2e38 + 2e38 = 4e38, which exceeds FLT_MAX (~3.4e38) and overflows to
+    // +Inf in float32 arithmetic. Verifies the isfinite guard on position
+    // resets it rather than letting Inf reach collision/scoring checks.
+    Ball ball = {
+        .position = { 2.0e38f, 2.0e38f },
+        .velocity = { 2.0e38f, 2.0e38f },
+        .radius = 10.0f
+    };
+
+    UpdateBallPosition(&ball);
+
+    TEST_ASSERT_FLOAT_IS_NOT_INF(ball.position.x);
+    TEST_ASSERT_FLOAT_IS_NOT_INF(ball.position.y);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, ball.position.x);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, ball.position.y);
 }
 
 void test_IsCollidingVertical_TopWallEdge(void) {
@@ -368,6 +407,22 @@ void test_HandlePaddleCollision_SpinClampedAtMaxSpeedY(void) {
     TEST_ASSERT_TRUE(ball.velocity.y >= -15.0f);  // Cap applies both directions
 }
 
+void test_HandlePaddleCollision_NaNSpinVelocityResetsToZero(void) {
+    // A NaN incoming Y velocity (e.g. from an earlier NaN velocity bug)
+    // stays NaN once spin is added (NaN + finite = NaN). The isfinite guard
+    // must catch this rather than let NaN escape the clamp comparisons below.
+    Ball ball = {
+        .position = { 35.0f, 250.0f },  // Top of paddle (paddleY = 250)
+        .velocity = { -5.0f, NAN },
+        .radius = 8.0f
+    };
+
+    HandlePaddleCollision(&ball, (Vector2){20.0f, 250.0f}, 15.0f, 100.0f);
+
+    TEST_ASSERT_FLOAT_IS_NOT_NAN(ball.velocity.y);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, ball.velocity.y);
+}
+
 void test_HandlePaddleCollision_UsesStructDimensionsForGeometry(void) {
     /* Collision detection uses the paddle dimensions passed as arguments.
      * A wider paddle (width 50) should collide where the standard 15-wide
@@ -512,6 +567,24 @@ void test_UpdatePaddlePosition_WithNullPointer(void) {
     // Should not crash
     UpdatePaddlePosition(NULL, 600);
     TEST_ASSERT_TRUE(1);
+}
+
+void test_UpdatePaddlePosition_NaNPositionResetsToTop(void) {
+    // NaN position (NaN + velocity is still NaN) must not survive the clamp
+    // checks below it, since ordered comparisons with NaN always return
+    // false. UpdatePaddlePosition resets it to the top of the screen first.
+    Paddle paddle = {
+        .position = { 20.0f, NAN },
+        .width = 15.0f,
+        .height = 100.0f,
+        .velocity = 5.0f,
+        .score = 0
+    };
+
+    UpdatePaddlePosition(&paddle, 600);
+
+    TEST_ASSERT_FLOAT_IS_NOT_NAN(paddle.position.y);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, paddle.position.y);
 }
 
 void test_UpdatePaddlePosition_MultipleFrames(void) {
@@ -1192,6 +1265,174 @@ void test_LoadLeaderboard_IgnoresEntriesBeyondMax(void) {
     if (oldHome) setenv("HOME", oldHome, 1);
 }
 
+void test_LoadLeaderboard_RejectsNaNSeconds(void) {
+    // sscanf's %f parses the literal string "nan" as a valid NaN float on
+    // POSIX. A NaN in the comparator makes qsort non-transitive (undefined
+    // behaviour), so LoadLeaderboard must reject the line outright rather
+    // than store it.
+    char tempHome[64];
+    snprintf(tempHome, sizeof(tempHome), "/tmp/purpletestXXXXXX");
+    if (!mkdtemp(tempHome)) {
+        TEST_IGNORE_MESSAGE("Failed to create temp directory");
+    }
+    const char *oldHome = getenv("HOME");
+    setenv("HOME", tempHome, 1);
+
+    char purpleDir[128];
+    snprintf(purpleDir, sizeof(purpleDir), "%s/.purple", tempHome);
+    mkdir(purpleDir, 0700);
+
+    char lbPath[160];
+    snprintf(lbPath, sizeof(lbPath), "%s/leaderboard.txt", purpleDir);
+    FILE *fp = fopen(lbPath, "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "nan;P;BAD\n");
+    fprintf(fp, "5.000;P;OKY\n");
+    fclose(fp);
+
+    Leaderboard lb = {0};
+    LoadLeaderboard(&lb);
+
+    TEST_ASSERT_EQUAL_UINT32(1, lb.count);
+    TEST_ASSERT_FLOAT_IS_NOT_NAN(lb.entries[0].seconds);
+    TEST_ASSERT_EQUAL_FLOAT(5.000f, lb.entries[0].seconds);
+
+    if (oldHome) setenv("HOME", oldHome, 1);
+}
+
+void test_LoadLeaderboard_RejectsNegativeSeconds(void) {
+    // sscanf's %f also parses a leading '-' as valid; a negative game time
+    // is not a valid result and must be filtered at load time.
+    char tempHome[64];
+    snprintf(tempHome, sizeof(tempHome), "/tmp/purpletestXXXXXX");
+    if (!mkdtemp(tempHome)) {
+        TEST_IGNORE_MESSAGE("Failed to create temp directory");
+    }
+    const char *oldHome = getenv("HOME");
+    setenv("HOME", tempHome, 1);
+
+    char purpleDir[128];
+    snprintf(purpleDir, sizeof(purpleDir), "%s/.purple", tempHome);
+    mkdir(purpleDir, 0700);
+
+    char lbPath[160];
+    snprintf(lbPath, sizeof(lbPath), "%s/leaderboard.txt", purpleDir);
+    FILE *fp = fopen(lbPath, "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "-5.000;P;BAD\n");
+    fprintf(fp, "5.000;P;OKY\n");
+    fclose(fp);
+
+    Leaderboard lb = {0};
+    LoadLeaderboard(&lb);
+
+    TEST_ASSERT_EQUAL_UINT32(1, lb.count);
+    TEST_ASSERT_EQUAL_FLOAT(5.000f, lb.entries[0].seconds);
+
+    if (oldHome) setenv("HOME", oldHome, 1);
+}
+
+void test_LoadLeaderboard_DefaultsUnknownWinnerToPlayer(void) {
+    // Any winner byte other than 'A' must default to 'P', matching
+    // AddLeaderboardEntry's behaviour, rather than storing a stray value
+    // that later code (which only branches on 'P' vs not) could misrender.
+    char tempHome[64];
+    snprintf(tempHome, sizeof(tempHome), "/tmp/purpletestXXXXXX");
+    if (!mkdtemp(tempHome)) {
+        TEST_IGNORE_MESSAGE("Failed to create temp directory");
+    }
+    const char *oldHome = getenv("HOME");
+    setenv("HOME", tempHome, 1);
+
+    char purpleDir[128];
+    snprintf(purpleDir, sizeof(purpleDir), "%s/.purple", tempHome);
+    mkdir(purpleDir, 0700);
+
+    char lbPath[160];
+    snprintf(lbPath, sizeof(lbPath), "%s/leaderboard.txt", purpleDir);
+    FILE *fp = fopen(lbPath, "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "5.000;X;ABC\n");
+    fclose(fp);
+
+    Leaderboard lb = {0};
+    LoadLeaderboard(&lb);
+
+    TEST_ASSERT_EQUAL_UINT32(1, lb.count);
+    TEST_ASSERT_EQUAL_CHAR('P', lb.entries[0].winner);
+
+    if (oldHome) setenv("HOME", oldHome, 1);
+}
+
+void test_LoadLeaderboard_SkipsMalformedLine(void) {
+    // A line missing the initials field only satisfies 2 of the 3 sscanf
+    // conversions ("%f;%c;%7s" needs a literal ';' after %c, which a
+    // trailing newline doesn't provide). LoadLeaderboard requires exactly
+    // 3 conversions and must skip the line rather than store a partial entry.
+    char tempHome[64];
+    snprintf(tempHome, sizeof(tempHome), "/tmp/purpletestXXXXXX");
+    if (!mkdtemp(tempHome)) {
+        TEST_IGNORE_MESSAGE("Failed to create temp directory");
+    }
+    const char *oldHome = getenv("HOME");
+    setenv("HOME", tempHome, 1);
+
+    char purpleDir[128];
+    snprintf(purpleDir, sizeof(purpleDir), "%s/.purple", tempHome);
+    mkdir(purpleDir, 0700);
+
+    char lbPath[160];
+    snprintf(lbPath, sizeof(lbPath), "%s/leaderboard.txt", purpleDir);
+    FILE *fp = fopen(lbPath, "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "5.000;P\n");
+    fprintf(fp, "6.000;P;OKY\n");
+    fclose(fp);
+
+    Leaderboard lb = {0};
+    LoadLeaderboard(&lb);
+
+    TEST_ASSERT_EQUAL_UINT32(1, lb.count);
+    TEST_ASSERT_EQUAL_FLOAT(6.000f, lb.entries[0].seconds);
+
+    if (oldHome) setenv("HOME", oldHome, 1);
+}
+
+void test_LoadLeaderboard_TruncatesOversizedLine(void) {
+    // A line far longer than the 256-byte fgets buffer in LoadLeaderboard
+    // spills its remainder into what looks like a separate "line" on the
+    // next fgets call. Neither chunk should parse as a valid entry, and
+    // the parser must not desync or crash for the valid entry that follows.
+    char tempHome[64];
+    snprintf(tempHome, sizeof(tempHome), "/tmp/purpletestXXXXXX");
+    if (!mkdtemp(tempHome)) {
+        TEST_IGNORE_MESSAGE("Failed to create temp directory");
+    }
+    const char *oldHome = getenv("HOME");
+    setenv("HOME", tempHome, 1);
+
+    char purpleDir[128];
+    snprintf(purpleDir, sizeof(purpleDir), "%s/.purple", tempHome);
+    mkdir(purpleDir, 0700);
+
+    char lbPath[160];
+    snprintf(lbPath, sizeof(lbPath), "%s/leaderboard.txt", purpleDir);
+    FILE *fp = fopen(lbPath, "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    for (int i = 0; i < 300; ++i) fputc('A', fp);
+    fputc('\n', fp);
+    fprintf(fp, "5.000;P;OKY\n");
+    fclose(fp);
+
+    Leaderboard lb = {0};
+    LoadLeaderboard(&lb);
+
+    TEST_ASSERT_EQUAL_UINT32(1, lb.count);
+    TEST_ASSERT_EQUAL_FLOAT(5.000f, lb.entries[0].seconds);
+
+    if (oldHome) setenv("HOME", oldHome, 1);
+}
+
 void test_SaveAndLoadLeaderboard_PreservesPlayerWinner(void) {
     char tempHome[64];
     snprintf(tempHome, sizeof(tempHome), "/tmp/purpletestXXXXXX");
@@ -1242,6 +1483,7 @@ int main(void) {
     RUN_TEST(test_MovePaddleDown_WithNullPointer);
     RUN_TEST(test_StopPaddle_WithNullPointer);
     RUN_TEST(test_UpdatePaddlePosition_WithNullPointer);
+    RUN_TEST(test_UpdatePaddlePosition_NaNPositionResetsToTop);
     RUN_TEST(test_UpdateAIPaddle_WithNullPaddle);
     RUN_TEST(test_AddLeaderboardEntry_WithNullLeaderboard);
     RUN_TEST(test_LoadLeaderboard_WithNullPointer);
@@ -1270,11 +1512,14 @@ int main(void) {
     RUN_TEST(test_HandlePaddleCollision_TinyPaddleNoSpinDivisionByZero);
     RUN_TEST(test_HandlePaddleCollision_SpinClampedAtMaxSpeedY);
     RUN_TEST(test_HandlePaddleCollision_UsesStructDimensionsForGeometry);
-    
+    RUN_TEST(test_HandlePaddleCollision_NaNSpinVelocityResetsToZero);
+
     // Ball position tests
     RUN_TEST(test_UpdateBallPosition_MovesCorrectly);
     RUN_TEST(test_UpdateBallPosition_MovesBackwards);
     RUN_TEST(test_UpdateBallPosition_WithZeroVelocity);
+    RUN_TEST(test_UpdateBallPosition_NaNVelocityResetsToZero);
+    RUN_TEST(test_UpdateBallPosition_InfPositionResetsToZero);
     RUN_TEST(test_UpdateBallPosition_LargeVelocity);
     RUN_TEST(test_UpdateBallPosition_NegativePosition);
     RUN_TEST(test_IsCollidingVertical_ZeroScreenHeight);
@@ -1338,6 +1583,11 @@ int main(void) {
     RUN_TEST(test_AddLeaderboardEntry_MaintainsSortAfterMultipleAdds);
     RUN_TEST(test_LoadLeaderboard_NonexistentFile);
     RUN_TEST(test_LoadLeaderboard_IgnoresEntriesBeyondMax);
+    RUN_TEST(test_LoadLeaderboard_RejectsNaNSeconds);
+    RUN_TEST(test_LoadLeaderboard_RejectsNegativeSeconds);
+    RUN_TEST(test_LoadLeaderboard_DefaultsUnknownWinnerToPlayer);
+    RUN_TEST(test_LoadLeaderboard_SkipsMalformedLine);
+    RUN_TEST(test_LoadLeaderboard_TruncatesOversizedLine);
     RUN_TEST(test_SaveLeaderboard_EmptyLeaderboard);
     RUN_TEST(test_SaveAndLoadLeaderboard_PersistsSorted);
     RUN_TEST(test_SaveAndLoadLeaderboard_PreservesPlayerWinner);

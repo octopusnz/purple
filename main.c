@@ -63,11 +63,36 @@ static void DrawPaddle(const Paddle *paddle, Color colour)
     DrawRectangleRounded(rec, 0.4f, 8, colour);
 }
 
-static void DrawCenteredText(Font font, const char *text, int y, int fontSize, Color colour)
+// X offset that centers text horizontally on screen. Callers that redraw the
+// same string every frame should cache this once instead of calling
+// MeasureTextEx per frame (see the leaderboard/title caching in main()).
+static float CenteredTextX(Font font, const char *text, int fontSize)
 {
     Vector2 textSize = MeasureTextEx(font, text, (float)fontSize, 1);
-    float x = (SCREEN_WIDTH - textSize.x) / 2.0f;
+    return (SCREEN_WIDTH - textSize.x) / 2.0f;
+}
+
+static void DrawCenteredText(Font font, const char *text, int y, int fontSize, Color colour)
+{
+    float x = CenteredTextX(font, text, fontSize);
     DrawTextEx(font, text, (Vector2){x, (float)y}, (float)fontSize, 1, colour);
+}
+
+// Leaderboard row text/position/colour; rebuilt only when the leaderboard
+// changes (load, or a new entry added), not every frame it's drawn.
+static void RebuildLeaderboardDisplay(Font font, const Leaderboard *lb,
+                                       char lines[][128], float lineX[],
+                                       Color lineColor[])
+{
+    for (size_t i = 0; i < lb->count; ++i) {
+        const LeaderboardEntry *e = &lb->entries[i];
+        snprintf(lines[i], 128, "%2zu.  %6.3fs   %c   %s",
+                 i + 1, (double)e->seconds, e->winner, e->initials);
+        lineX[i] = CenteredTextX(font, lines[i], MESSAGE_FONT_SIZE);
+        lineColor[i] = (e->winner == 'P')
+            ? (Color){80, 160, 255, 255}
+            : (Color){255, 80, 80, 255};
+    }
 }
 
 int main(void)
@@ -90,6 +115,12 @@ int main(void)
     Font orbitronFont = LoadFontEx(FindFontPath(), 64, kGameCodepoints,
                                    (int)(sizeof(kGameCodepoints) / sizeof(kGameCodepoints[0])));
     SetTextureFilter(orbitronFont.texture, TEXTURE_FILTER_BILINEAR);
+
+    // X positions for strings that never change; measured once instead of
+    // every frame (the title is drawn in every game state).
+    float titleX = CenteredTextX(orbitronFont, "PURPLE", TITLE_FONT_SIZE);
+    float subtitleX = CenteredTextX(orbitronFont, "FASTEST WINS", SCORE_FONT_SIZE);
+    float footerX = CenteredTextX(orbitronFont, "PRESS SPACE TO PLAY", MESSAGE_FONT_SIZE);
 
     // Initialize ball
     Ball ball = {
@@ -124,6 +155,14 @@ int main(void)
 
     Leaderboard leaderboard;
     LoadLeaderboard(&leaderboard);
+
+    // Cached leaderboard row text/position/colour; rebuilt only when the
+    // leaderboard content changes (see RebuildLeaderboardDisplay calls below).
+    char leaderboardLines[LEADERBOARD_MAX_ENTRIES][128];
+    float leaderboardLineX[LEADERBOARD_MAX_ENTRIES];
+    Color leaderboardLineColor[LEADERBOARD_MAX_ENTRIES];
+    RebuildLeaderboardDisplay(orbitronFont, &leaderboard, leaderboardLines,
+                              leaderboardLineX, leaderboardLineColor);
 
     char initials[4] = {' ', ' ', ' ', '\0'};
     int initialsCount = 0;
@@ -204,6 +243,8 @@ int main(void)
                     // Save AI win automatically
                     AddLeaderboardEntry(&leaderboard, "AI", 'A', lastGameSeconds);
                     SaveLeaderboard(&leaderboard);
+                    RebuildLeaderboardDisplay(orbitronFont, &leaderboard, leaderboardLines,
+                                              leaderboardLineX, leaderboardLineColor);
                     gameState = START_SCREEN;
                 } else {
                     ResetBall(&ball, SCREEN_WIDTH, SCREEN_HEIGHT, ballSpeedMultiplier);
@@ -247,6 +288,8 @@ int main(void)
             if (IsKeyPressed(KEY_ENTER) && initialsCount > 0) {
                 AddLeaderboardEntry(&leaderboard, initials, 'P', lastGameSeconds);
                 SaveLeaderboard(&leaderboard);
+                RebuildLeaderboardDisplay(orbitronFont, &leaderboard, leaderboardLines,
+                                          leaderboardLineX, leaderboardLineColor);
                 gameState = START_SCREEN;
             }
         }
@@ -276,27 +319,22 @@ int main(void)
             }
         }
 
-        // Draw title
-        DrawCenteredText(orbitronFont, "PURPLE", 10, TITLE_FONT_SIZE, WHITE);
+        // Draw title (position cached; string never changes)
+        DrawTextEx(orbitronFont, "PURPLE", (Vector2){titleX, 10.0f},
+                   (float)TITLE_FONT_SIZE, 1, WHITE);
 
         if (gameState == START_SCREEN) {
-            DrawCenteredText(orbitronFont, "FASTEST WINS", 90, SCORE_FONT_SIZE,
-                             (Color){200, 200, 220, 255});
+            DrawTextEx(orbitronFont, "FASTEST WINS", (Vector2){subtitleX, 90.0f},
+                       (float)SCORE_FONT_SIZE, 1, (Color){200, 200, 220, 255});
             int startY = 135;
             for (size_t i = 0; i < leaderboard.count; ++i) {
-                const LeaderboardEntry *e = &leaderboard.entries[i];
-                char line[128];
-                snprintf(line, sizeof(line), "%2zu.  %6.3fs   %c   %s",
-                         i + 1, (double)e->seconds, e->winner, e->initials);
-                Color rowColor = (e->winner == 'P')
-                    ? (Color){80, 160, 255, 255}
-                    : (Color){255, 80, 80, 255};
-                DrawCenteredText(orbitronFont, line, startY + (int)i * 32,
-                                 MESSAGE_FONT_SIZE, rowColor);
+                DrawTextEx(orbitronFont, leaderboardLines[i],
+                           (Vector2){leaderboardLineX[i], (float)(startY + (int)i * 32)},
+                           (float)MESSAGE_FONT_SIZE, 1, leaderboardLineColor[i]);
             }
-            DrawCenteredText(orbitronFont, "PRESS SPACE TO PLAY",
-                             SCREEN_HEIGHT - 70, MESSAGE_FONT_SIZE,
-                             (Color){180, 180, 200, 255});
+            DrawTextEx(orbitronFont, "PRESS SPACE TO PLAY",
+                       (Vector2){footerX, (float)(SCREEN_HEIGHT - 70)},
+                       (float)MESSAGE_FONT_SIZE, 1, (Color){180, 180, 200, 255});
         } else if (gameState == PLAYING) {
             DrawPaddle(&player, (Color){80, 160, 255, 255});
             DrawPaddle(&ai, (Color){255, 80, 80, 255});

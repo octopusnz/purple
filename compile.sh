@@ -49,7 +49,7 @@ if [ $# -gt 0 ]; then
     elif [ "$1" = "--fuzz-long" ] || [ "$1" = "fuzz-long" ]; then
         FUZZ_MODE=true
         FUZZ_LONG_MODE=true
-        echo "Building coverage-guided FUZZ TESTING binaries (extended 96-minute run)..."
+        echo "Building coverage-guided FUZZ TESTING binaries (extended 168-minute run)..."
     elif [ "$1" = "--clean" ] || [ "$1" = "clean" ]; then
         echo "Cleaning binaries and object files..."
         if [ -d build ]; then
@@ -64,8 +64,8 @@ if [ $# -gt 0 ]; then
         echo "  No arguments: Production build with optimizations"
         echo "  --debug or debug: Debug build with ASAN, UBSan, and Valgrind checks"
         echo "  --test or test: Build and run unit tests"
-        echo "  --fuzz or fuzz: Build and run coverage-guided fuzz testing (60s per target, 8 min total)"
-        echo "  --fuzz-long or fuzz-long: Extended fuzz testing (12 min per target, 96 min total)"
+        echo "  --fuzz or fuzz: Build and run coverage-guided fuzz testing (60s per target, 14 min total)"
+        echo "  --fuzz-long or fuzz-long: Extended fuzz testing (12 min per target, 168 min total)"
         echo "  --clean or clean: Remove all binaries and object files"
         exit 1
     fi
@@ -264,7 +264,8 @@ if [ "$DEBUG_MODE" = true ]; then
         cppcheck --check-level=exhaustive --enable=all --inconclusive \
             --verbose --force --suppress=missingIncludeSystem \
             --suppress=staticFunction:resource.c --std=c99 \
-            --checkers-report="$CHECKERS_REPORT" main.c 2>&1 || true
+            --checkers-report="$CHECKERS_REPORT" \
+            main.c ball.c paddle.c leaderboard.c resource.c 2>&1 || true
         echo ""
         echo "=== Checkers Report ==="
         cat "$CHECKERS_REPORT"
