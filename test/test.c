@@ -407,6 +407,30 @@ void test_HandlePaddleCollision_SpinClampedAtMaxSpeedY(void) {
     TEST_ASSERT_TRUE(ball.velocity.y >= -15.0f);  // Cap applies both directions
 }
 
+void test_HandlePaddleCollision_SpinClampedAtMinSpeedY(void) {
+    /* Mirror of test_HandlePaddleCollision_SpinClampedAtMaxSpeedY, but hitting
+     * the BOTTOM edge of the paddle repeatedly to drive velocity.y positive
+     * instead of negative.  gcov branch coverage showed the
+     * "ball->velocity.y > MAX_BALL_SPEED_Y" clamp in HandlePaddleCollision was
+     * never taken by the suite: every existing spin test only pushed
+     * velocity.y toward the negative cap.
+     */
+    Ball ball = {
+        .position = { 35.0f, 350.0f },  // Bottom edge of paddle -> max positive spin
+        .velocity = { -5.0f, 0.0f },
+        .radius = 8.0f
+    };
+    Vector2 paddlePos = { 20.0f, 250.0f };
+
+    for (int i = 0; i < 20; ++i) {
+        ball.position.x = 35.0f;   // Reset inside paddle so collision fires
+        ball.velocity.x = -5.0f;   // Ball must be moving toward paddle
+        HandlePaddleCollision(&ball, paddlePos, 15.0f, 100.0f);
+    }
+
+    TEST_ASSERT_EQUAL_FLOAT(15.0f, ball.velocity.y);  // Clamped to exactly +MAX
+}
+
 void test_HandlePaddleCollision_NaNSpinVelocityResetsToZero(void) {
     // A NaN incoming Y velocity (e.g. from an earlier NaN velocity bug)
     // stays NaN once spin is added (NaN + finite = NaN). The isfinite guard
@@ -917,6 +941,49 @@ const char* find_resource_directory(void) {
 
 // ==================== Resource Function Tests ====================
 
+void test_FindResourceDirectory_FallsBackWhenNoneFound(void) {
+    /* FindResourceDirectory() caches its result after the first call, so the
+     * "no resources directory found anywhere" fallback (the last few lines
+     * of the function) is unreachable once anything has found the real
+     * resources/ directory -- confirmed unreachable by gcov in the normal
+     * run. ResetResourceDirectoryCacheForTesting() forces a cold-cache scan
+     * from an isolated directory nested 3 levels deep, so none of the 5
+     * candidate paths ("./resources" through "../../../resources") resolve
+     * to a real directory, and confirms the function falls back to
+     * "./resources" instead of crashing or returning something unexpected.
+     * The cache is reset again afterward so this fake result doesn't leak
+     * into any other test -- this test has no dependency on RUN_TEST order.
+     */
+    char origCwd[512];
+    TEST_ASSERT_NOT_NULL(getcwd(origCwd, sizeof(origCwd)));
+
+    char tempDir[64];
+    snprintf(tempDir, sizeof(tempDir), "/tmp/purpletestXXXXXX");
+    if (!mkdtemp(tempDir)) {
+        TEST_IGNORE_MESSAGE("Failed to create temp directory");
+    }
+
+    char level1[80], level2[96], level3[112];
+    snprintf(level1, sizeof(level1), "%s/a", tempDir);
+    snprintf(level2, sizeof(level2), "%s/a/b", tempDir);
+    snprintf(level3, sizeof(level3), "%s/a/b/c", tempDir);
+    if (mkdir(level1, 0700) != 0 || mkdir(level2, 0700) != 0 || mkdir(level3, 0700) != 0) {
+        TEST_IGNORE_MESSAGE("Failed to create nested temp directories");
+    }
+
+    TEST_ASSERT_EQUAL_INT(0, chdir(level3));
+    ResetResourceDirectoryCacheForTesting();
+    const char *dir = FindResourceDirectory();
+    int fallbackCorrect = (dir != NULL && strcmp(dir, "./resources") == 0);
+
+    // Reset again and return to the real cwd so the next real call re-scans
+    // for the genuine resources/ directory instead of reusing this fake one.
+    ResetResourceDirectoryCacheForTesting();
+    TEST_ASSERT_EQUAL_INT(0, chdir(origCwd));
+
+    TEST_ASSERT_TRUE(fallbackCorrect);
+}
+
 void test_FindResourceDirectory_IsValid(void) {
     const char *dir = FindResourceDirectory();
     TEST_ASSERT_TRUE(directory_exists(dir));
@@ -1073,6 +1140,51 @@ void test_SaveLeaderboard_WithNullPointer(void) {
     TEST_ASSERT_TRUE(1);  // Should not crash
 }
 
+void test_SaveLeaderboard_FailsGracefullyWhenDirUnwritable(void) {
+    /* Every existing SaveLeaderboard test writes to a directory it can
+     * create, so the "fopen returned NULL" branch (e.g. disk full,
+     * permissions, or EnsureDirExists' mkdir being silently ignored) was
+     * never exercised. Root bypasses permission bits, so this can't be
+     * reproduced there -- skip rather than asserting something false.
+     */
+    if (geteuid() == 0) {
+        TEST_IGNORE_MESSAGE("Cannot test permission failure as root");
+    }
+
+    char tempHome[64];
+    snprintf(tempHome, sizeof(tempHome), "/tmp/purpletestXXXXXX");
+    if (!mkdtemp(tempHome)) {
+        TEST_IGNORE_MESSAGE("Failed to create temp directory");
+    }
+    // Read+execute only: EnsureDirExists' mkdir(".purple") and any fopen
+    // beneath it both fail with the directory missing.
+    TEST_ASSERT_EQUAL_INT(0, chmod(tempHome, 0500));
+
+    const char *oldHome = getenv("HOME");
+    char oldHomeBuf[512] = {0};
+    int hadHome = (oldHome != NULL);
+    if (hadHome) snprintf(oldHomeBuf, sizeof(oldHomeBuf), "%s", oldHome);
+    setenv("HOME", tempHome, 1);
+
+    Leaderboard lb = {0};
+    AddLeaderboardEntry(&lb, "ABC", 'P', 1.0f);
+    SaveLeaderboard(&lb);  // Must not crash even though the write fails
+
+    // Confirm the write genuinely failed rather than just "didn't crash": if
+    // chmod somehow didn't block it (a permissive mount, an ACL, etc. not
+    // caught by the geteuid()==0 guard above), this catches that instead of
+    // passing regardless of whether the intended branch actually ran.
+    char lbPath[576];
+    snprintf(lbPath, sizeof(lbPath), "%s/.purple/leaderboard.txt", tempHome);
+    int fileWasWritten = file_exists(lbPath);
+
+    if (hadHome) setenv("HOME", oldHomeBuf, 1);
+    else unsetenv("HOME");
+    chmod(tempHome, 0700);  // Restore so the directory can be cleaned up
+
+    TEST_ASSERT_FALSE(fileWasWritten);
+}
+
 void test_SaveLeaderboard_EmptyLeaderboard(void) {
     char tempHome[64];
     snprintf(tempHome, sizeof(tempHome), "/tmp/purpletestXXXXXX");
@@ -1189,12 +1301,11 @@ void test_AddLeaderboardEntry_DuplicateTimes(void) {
     AddLeaderboardEntry(&lb, "AAA", 'P', 10.0f);
     AddLeaderboardEntry(&lb, "BBB", 'P', 10.0f);
     AddLeaderboardEntry(&lb, "CCC", 'A', 10.0f);
-    
+
     TEST_ASSERT_EQUAL_UINT32(3, lb.count);
     // All should have same time
-    TEST_ASSERT_EQUAL_FLOAT(10.0f, lb.entries[0].seconds);
-    TEST_ASSERT_EQUAL_FLOAT(10.0f, lb.entries[1].seconds);
-    TEST_ASSERT_EQUAL_FLOAT(10.0f, lb.entries[2].seconds);
+    float times[3] = { lb.entries[0].seconds, lb.entries[1].seconds, lb.entries[2].seconds };
+    TEST_ASSERT_EACH_EQUAL_FLOAT(10.0f, times, 3);
 }
 
 void test_AddLeaderboardEntry_LongInitials(void) {
@@ -1433,6 +1544,98 @@ void test_LoadLeaderboard_TruncatesOversizedLine(void) {
     if (oldHome) setenv("HOME", oldHome, 1);
 }
 
+void test_LoadLeaderboard_ShortInitialsPadded(void) {
+    // Every existing LoadLeaderboard fixture uses 3-character initials, so
+    // the "%7s" copy loop's early-terminator branch (initials shorter than
+    // 3 chars) was never taken (confirmed via gcov branch coverage). Unlike
+    // AddLeaderboardEntry/UppercaseInitials (which pads with ' '), this loop
+    // pads remaining slots with '\0' -- a real but harmless inconsistency
+    // between the two entry points (only reachable via a hand-edited or
+    // short-initials save file; %s rendering is unaffected either way since
+    // initials is always the last field printed).
+    char tempHome[64];
+    snprintf(tempHome, sizeof(tempHome), "/tmp/purpletestXXXXXX");
+    if (!mkdtemp(tempHome)) {
+        TEST_IGNORE_MESSAGE("Failed to create temp directory");
+    }
+    // Snapshot HOME into a local buffer rather than holding the getenv()
+    // pointer across the setenv() below: POSIX doesn't guarantee that
+    // pointer stays valid once the variable is overwritten (CERT ENV34-C).
+    const char *oldHome = getenv("HOME");
+    char oldHomeBuf[512] = {0};
+    int hadHome = (oldHome != NULL);
+    if (hadHome) snprintf(oldHomeBuf, sizeof(oldHomeBuf), "%s", oldHome);
+    setenv("HOME", tempHome, 1);
+
+    char purpleDir[128];
+    snprintf(purpleDir, sizeof(purpleDir), "%s/.purple", tempHome);
+    mkdir(purpleDir, 0700);
+
+    char lbPath[160];
+    snprintf(lbPath, sizeof(lbPath), "%s/leaderboard.txt", purpleDir);
+    FILE *fp = fopen(lbPath, "w");
+    TEST_ASSERT_NOT_NULL(fp);
+    fprintf(fp, "5.000;P;X\n");
+    fclose(fp);
+
+    Leaderboard lb = {0};
+    LoadLeaderboard(&lb);
+
+    TEST_ASSERT_EQUAL_UINT32(1, lb.count);
+    TEST_ASSERT_EQUAL_CHAR('X', lb.entries[0].initials[0]);
+    TEST_ASSERT_EQUAL_CHAR('\0', lb.entries[0].initials[1]);
+    TEST_ASSERT_EQUAL_CHAR('\0', lb.entries[0].initials[2]);
+
+    if (hadHome) setenv("HOME", oldHomeBuf, 1);
+    else unsetenv("HOME");
+}
+
+void test_SaveAndLoadLeaderboard_FallsBackToCwdWhenHomeUnset(void) {
+    // GetLeaderboardDir() falls back to "." when HOME is unset or empty, and
+    // GetLeaderboardPath() then targets "leaderboard.txt" directly instead of
+    // "<dir>/.purple/leaderboard.txt". Every other leaderboard test sets HOME,
+    // so this fallback (and the EnsureDirExists "directory already exists"
+    // branch, since cwd always exists) was never taken.
+    char origCwd[512];
+    TEST_ASSERT_NOT_NULL(getcwd(origCwd, sizeof(origCwd)));
+
+    char tempDir[64];
+    snprintf(tempDir, sizeof(tempDir), "/tmp/purpletestXXXXXX");
+    if (!mkdtemp(tempDir)) {
+        TEST_IGNORE_MESSAGE("Failed to create temp directory");
+    }
+    TEST_ASSERT_EQUAL_INT(0, chdir(tempDir));
+
+    const char *oldHome = getenv("HOME");
+    char oldHomeBuf[512] = {0};
+    int hadHome = (oldHome != NULL);
+    if (hadHome) snprintf(oldHomeBuf, sizeof(oldHomeBuf), "%s", oldHome);
+    unsetenv("HOME");
+
+    Leaderboard lb = {0};
+    AddLeaderboardEntry(&lb, "CWD", 'P', 7.5f);
+    SaveLeaderboard(&lb);
+
+    char lbAbsPath[576];
+    snprintf(lbAbsPath, sizeof(lbAbsPath), "%s/leaderboard.txt", tempDir);
+    int fileWasCreated = file_exists(lbAbsPath);
+
+    Leaderboard loaded = {0};
+    LoadLeaderboard(&loaded);
+
+    // Restore HOME/cwd before any assertion below can longjmp out -- otherwise
+    // a genuine regression here (the exact thing this test exists to catch)
+    // would also skip cleanup and corrupt every later test's HOME/cwd.
+    if (hadHome) setenv("HOME", oldHomeBuf, 1);
+    else unsetenv("HOME");
+    TEST_ASSERT_EQUAL_INT(0, chdir(origCwd));
+
+    TEST_ASSERT_TRUE(fileWasCreated);
+    TEST_ASSERT_EQUAL_UINT32(1, loaded.count);
+    TEST_ASSERT_EQUAL_STRING_LEN("CWD", loaded.entries[0].initials, 3);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, 7.5f, loaded.entries[0].seconds);
+}
+
 void test_SaveAndLoadLeaderboard_PreservesPlayerWinner(void) {
     char tempHome[64];
     snprintf(tempHome, sizeof(tempHome), "/tmp/purpletestXXXXXX");
@@ -1474,7 +1677,7 @@ void test_AddLeaderboardEntry_MaintainsSortAfterMultipleAdds(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    
+
     // Critical null pointer tests first (fail fast)
     RUN_TEST(test_IsCollidingVertical_WithNullPointer);
     RUN_TEST(test_HandlePaddleCollision_WithNullBall);
@@ -1511,6 +1714,7 @@ int main(void) {
     RUN_TEST(test_HandlePaddleCollision_SpinAccumulatesOnExistingY);
     RUN_TEST(test_HandlePaddleCollision_TinyPaddleNoSpinDivisionByZero);
     RUN_TEST(test_HandlePaddleCollision_SpinClampedAtMaxSpeedY);
+    RUN_TEST(test_HandlePaddleCollision_SpinClampedAtMinSpeedY);
     RUN_TEST(test_HandlePaddleCollision_UsesStructDimensionsForGeometry);
     RUN_TEST(test_HandlePaddleCollision_NaNSpinVelocityResetsToZero);
 
@@ -1558,6 +1762,7 @@ int main(void) {
     RUN_TEST(test_FindResourceFile_NullSubpathDoesNotCrash);
     RUN_TEST(test_FindFontPath_ReturnsNonNull);
     RUN_TEST(test_FindResourceDirectory_IsConsistent);
+    RUN_TEST(test_FindResourceDirectory_FallsBackWhenNoneFound);
     
     // Font file tests
     RUN_TEST(test_RaylibVersion_AtLeastSix);
@@ -1589,8 +1794,11 @@ int main(void) {
     RUN_TEST(test_LoadLeaderboard_SkipsMalformedLine);
     RUN_TEST(test_LoadLeaderboard_TruncatesOversizedLine);
     RUN_TEST(test_SaveLeaderboard_EmptyLeaderboard);
+    RUN_TEST(test_SaveLeaderboard_FailsGracefullyWhenDirUnwritable);
     RUN_TEST(test_SaveAndLoadLeaderboard_PersistsSorted);
     RUN_TEST(test_SaveAndLoadLeaderboard_PreservesPlayerWinner);
-    
+    RUN_TEST(test_LoadLeaderboard_ShortInitialsPadded);
+    RUN_TEST(test_SaveAndLoadLeaderboard_FallsBackToCwdWhenHomeUnset);
+
     return UNITY_END();
 }

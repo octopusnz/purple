@@ -23,4 +23,8 @@ const char* FindFontPath(void);
 // Returns a path to the resources directory (caller should not free)
 const char* FindResourceDirectory(void);
 
+// Test-only: clear FindResourceDirectory's cached result so the next call
+// re-scans from the current directory. Never called by the game itself.
+void ResetResourceDirectoryCacheForTesting(void);
+
 #endif // RESOURCE_H

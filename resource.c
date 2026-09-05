@@ -20,16 +20,18 @@ static int LocalDirectoryExists(const char *path)
     return (stat(path, &st) == 0) && S_ISDIR(st.st_mode);
 }
 
+// File-scope (not function-local) so ResetResourceDirectoryCacheForTesting
+// can clear them from outside FindResourceDirectory.
+static char resourcePathCache[MAX_PATH_LENGTH];
+static int  resourceDirInitialized = 0;
+
 // Find resources directory by searching parent directories.
 // Public API declared in resource.h; also used directly by the fuzz harness.
 // The result is cached after the first call so repeated invocations skip the
 // stat() scan entirely.
 const char* FindResourceDirectory(void)
 {
-    static char resourcePath[MAX_PATH_LENGTH];
-    static int  initialized = 0;
-
-    if (initialized) return resourcePath;
+    if (resourceDirInitialized) return resourcePathCache;
 
     const char *basePaths[] = {
         "./resources",
@@ -41,16 +43,21 @@ const char* FindResourceDirectory(void)
 
     for (size_t i = 0; i < sizeof(basePaths) / sizeof(basePaths[0]); i++) {
         if (LocalDirectoryExists(basePaths[i])) {
-            snprintf(resourcePath, sizeof(resourcePath), "%s", basePaths[i]);
-            initialized = 1;
-            return resourcePath;
+            snprintf(resourcePathCache, sizeof(resourcePathCache), "%s", basePaths[i]);
+            resourceDirInitialized = 1;
+            return resourcePathCache;
         }
     }
 
     // Default fallback
-    snprintf(resourcePath, sizeof(resourcePath), "%s", "./resources");
-    initialized = 1;
-    return resourcePath;
+    snprintf(resourcePathCache, sizeof(resourcePathCache), "%s", "./resources");
+    resourceDirInitialized = 1;
+    return resourcePathCache;
+}
+
+void ResetResourceDirectoryCacheForTesting(void)
+{
+    resourceDirInitialized = 0;
 }
 
 // Find a resource file within the resources directory.

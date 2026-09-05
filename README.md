@@ -96,7 +96,7 @@ purple/
 │   ├── fuzz_ai_paddle.c           # AI decision making fuzzer
 │   └── fuzz_game_physics.c        # Multi-frame gameplay fuzzer
 ├── test/
-│   └── test.c               # Unit tests (81 tests using Unity framework)
+│   └── test.c               # Unit tests (104 tests using Unity framework)
 ├── resources/
 │   ├── orbitron/            # Orbitron variable font files
 │   ├── RAY-LICENSE.txt      # Raylib license
@@ -114,7 +114,7 @@ purple/
 
 ### Unit Tests
 
-The project includes 81 comprehensive unit tests covering:
+The project includes 104 comprehensive unit tests covering:
 
 - Ball physics and collision detection
 - Paddle movement and boundary handling
